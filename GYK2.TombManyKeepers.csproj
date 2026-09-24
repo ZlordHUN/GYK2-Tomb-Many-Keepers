@@ -1,0 +1,20 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <Import Project="build/UnityMod.props" />
+  <PropertyGroup>
+    <Version>0.1</Version>
+    <Product>Graveyard Keeper 2: Tomb Many Keepers</Product>
+    <EnableDefaultItems>false</EnableDefaultItems>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(Configuration)' == 'Release'">
+    <DebugType>none</DebugType>
+    <DebugSymbols>false</DebugSymbols>
+  </PropertyGroup>
+  <ItemGroup>
+    <Compile Include="src/**/*.cs" Exclude="src/**/bin/**;src/**/obj/**" />
+    <EmbeddedResource Include="assets/MainMenu/WideBackground.png" LogicalName="GYK2.TombManyKeepers.WideBackground.png" />
+    <Reference Include="Unity.TextMeshPro;UnityEngine.UI;UnityEngine.InputLegacyModule;UnityEngine.PhysicsModule;UnityEngine.AnimationModule;UnityEngine.ImageConversionModule;UnityEngine.ParticleSystemModule">
+      <HintPath>$(ManagedDir)/%(Identity).dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+  </ItemGroup>
+</Project>

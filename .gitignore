@@ -1,0 +1,40 @@
+# Publish only the mod source, release DLL, build essentials, README and license.
+*
+
+!/.gitignore
+!/README.md
+!/LICENSE
+!/GYK2.TombManyKeepers.csproj
+!/global.json
+!/NuGet.Config
+
+!/.github/
+!/.github/workflows/
+!/.github/workflows/nightly.yml
+
+!/src/
+!/src/**/
+!/src/**/*.cs
+
+# User-supplied menu artwork is embedded in the production DLL.
+!/assets/
+!/assets/MainMenu/
+!/assets/MainMenu/WideBackground.png
+
+!/build/
+!/build/UnityMod.props
+!/build/Local.props.example
+
+# Generated directories remain local even when they contain source files.
+bin/
+obj/
+.vs/
+.idea/
+__pycache__/
+.venv/
+
+# Commit only the locally built production plugin from the build outputs.
+!/bin/
+!/bin/Release/
+!/bin/Release/netstandard2.1/
+!/bin/Release/netstandard2.1/GYK2.TombManyKeepers.dll

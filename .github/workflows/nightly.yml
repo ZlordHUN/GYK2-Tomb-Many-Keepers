@@ -1,0 +1,73 @@
+name: Nightly
+
+on:
+  push:
+    branches: ['**']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  nightly:
+    if: github.ref == format('refs/heads/{0}', github.event.repository.default_branch)
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: write
+    concurrency:
+      group: nightly-release
+      queue: max
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+
+      - name: Package
+        run: |
+          if [[ ! -s bin/Release/netstandard2.1/GYK2.TombManyKeepers.dll ]]; then
+            echo "::error::Build locally and commit bin/Release/netstandard2.1/GYK2.TombManyKeepers.dll before publishing."
+            exit 1
+          fi
+          mkdir -p "$RUNNER_TEMP/package/BepInEx/plugins/GYK2.TombManyKeepers"
+          cp bin/Release/netstandard2.1/GYK2.TombManyKeepers.dll \
+            "$RUNNER_TEMP/package/BepInEx/plugins/GYK2.TombManyKeepers/"
+          cp README.md LICENSE "$RUNNER_TEMP/package/"
+          printf 'Commit: %s\nWorkflow run: %s\n' "$GITHUB_SHA" "$GITHUB_RUN_NUMBER" \
+            > "$RUNNER_TEMP/package/BUILD.txt"
+          cd "$RUNNER_TEMP/package"
+          zip -q "$RUNNER_TEMP/GYK2.TombManyKeepers-nightly.zip" \
+            BepInEx/plugins/GYK2.TombManyKeepers/GYK2.TombManyKeepers.dll README.md LICENSE BUILD.txt
+
+      - name: Publish nightly
+        env:
+          GH_TOKEN: ${{ github.token }}
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+        run: |
+          # An older queued run must not replace a newer nightly.
+          head=$(gh api "repos/$GITHUB_REPOSITORY/git/ref/heads/$DEFAULT_BRANCH" --jq .object.sha)
+          if [[ "$head" != "$GITHUB_SHA" ]]; then
+            echo "A newer commit is on the default branch; leaving publication to its workflow run."
+            exit 0
+          fi
+          printf 'Prebuilt plugin from [%s](%s/%s/commit/%s).\n\n[Workflow run](%s/%s/actions/runs/%s).\n\nExtract the ZIP into your game folder with BepInEx installed.\n' \
+            "${GITHUB_SHA:0:7}" "$GITHUB_SERVER_URL" "$GITHUB_REPOSITORY" "$GITHUB_SHA" \
+            "$GITHUB_SERVER_URL" "$GITHUB_REPOSITORY" "$GITHUB_RUN_ID" \
+            > "$RUNNER_TEMP/nightly-notes.md"
+          if gh release view nightly --repo "$GITHUB_REPOSITORY" > /dev/null 2>&1; then
+            gh release upload nightly "$RUNNER_TEMP/GYK2.TombManyKeepers-nightly.zip" \
+              --repo "$GITHUB_REPOSITORY" --clobber
+            gh api --method PATCH "repos/$GITHUB_REPOSITORY/git/refs/tags/nightly" \
+              -f sha="$GITHUB_SHA" -F force=true > /dev/null
+            gh release edit nightly --repo "$GITHUB_REPOSITORY" \
+              --title Nightly --prerelease --latest=false \
+              --notes-file "$RUNNER_TEMP/nightly-notes.md"
+          else
+            gh release create nightly "$RUNNER_TEMP/GYK2.TombManyKeepers-nightly.zip" \
+              --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" \
+              --title Nightly --prerelease --latest=false \
+              --notes-file "$RUNNER_TEMP/nightly-notes.md"
+          fi

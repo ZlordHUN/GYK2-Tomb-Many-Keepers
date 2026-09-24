@@ -1,0 +1,7 @@
+<Project>
+  <PropertyGroup>
+    <!-- Copy to Local.props and use your game/loader paths. Local.props is ignored. -->
+    <GameDir>/path/to/Graveyard Keeper 2</GameDir>
+    <BepInExDir>$(GameDir)/BepInEx</BepInExDir>
+  </PropertyGroup>
+</Project>
