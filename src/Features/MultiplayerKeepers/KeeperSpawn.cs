@@ -2,12 +2,17 @@ using HarmonyLib;
 using LazyBearTechnology;
 using UnityEngine;
 
-namespace GYK2.TombManyKeepers.Features.SecondKeeper;
+namespace GYK2.TombManyKeepers.Features.MultiplayerKeepers;
 
 [HarmonyPatch]
-internal static class SecondKeeperSpawn
+internal static class KeeperSpawn
 {
-    private static readonly Vector3 SpawnOffset = Vector3.left * 4.42f;
+    private static readonly Vector3[] SpawnOffsets =
+    {
+        Vector3.left * 4.42f,
+        Vector3.left * 2.18f,
+        Vector3.right * 14.14f
+    };
     private static readonly AccessTools.FieldRef<PlayerController, PlayerData> ControllerData =
         AccessTools.FieldRefAccess<PlayerController, PlayerData>("playerData");
     private static readonly AccessTools.FieldRef<PlayerPhysicalBody, PlayerData> BodyData =
@@ -15,10 +20,8 @@ internal static class SecondKeeperSpawn
     private static readonly AccessTools.FieldRef<GenericSprite, bool> CastShadows =
         AccessTools.FieldRefAccess<GenericSprite, bool>("castShadows");
 
-    private static GameObject keeper;
-    private static GameObject shackles;
-    private static PlayerController primary;
-    private static PlayerAnimation animation;
+    private static GameObject keepers;
+    private static KeeperChains[] chainSequences;
 
     internal static void Enable()
     {
@@ -29,9 +32,19 @@ internal static class SecondKeeperSpawn
 
     private static void Spawn()
     {
-        // The opening teleport places both keepers before the prison fade clears.
+        // The opening teleport places every keeper before the prison fade clears.
         PlayerController.OnPlayerTeleported -= Spawn;
-        primary = MainGame.PlayerController;
+        var primary = MainGame.PlayerController;
+        keepers = new GameObject("Multiplayer Keepers");
+        keepers.transform.SetParent(primary.CurrentGameScene.transform, true);
+        chainSequences = new KeeperChains[SpawnOffsets.Length];
+        for (int i = 0; i < SpawnOffsets.Length; i++)
+            chainSequences[i] = SpawnKeeper(primary, i + 2, SpawnOffsets[i]);
+        LazySingleton<Microphone>.Instance.SetTarget(primary.View.transform);
+    }
+
+    private static KeeperChains SpawnKeeper(PlayerController primary, int number, Vector3 offset)
+    {
         var data = PlayerData.CreatePlayerData();
         data.Guid.SetGuid(new SGuid());
         data.currentGameSceneId = primary.PlayerData.currentGameSceneId;
@@ -39,10 +52,11 @@ internal static class SecondKeeperSpawn
         data.charState.Value = AnimationState.Idle;
 
         // Configure the clone before OnEnable can replace shared player references.
-        keeper = new GameObject("Second Keeper");
+        var keeper = new GameObject($"Keeper {number}");
+        keeper.transform.SetParent(keepers.transform, false);
         keeper.SetActive(false);
         var body = Object.Instantiate(primary.PhysicalBody, keeper.transform);
-        body.name = "Second Keeper";
+        body.name = keeper.name;
         var controller = body.GetComponent<PlayerController>();
         ControllerData(controller) = data;
         BodyData(body) = data;
@@ -61,16 +75,15 @@ internal static class SecondKeeperSpawn
         view.enabled = false;
         view.ControllingWispView = false;
         // The primary is already chained; the clone's default pose must hide the chain overlay.
-        animation = view.GetComponent<PlayerAnimation>();
+        var animation = view.GetComponent<PlayerAnimation>();
         var chains = animation.Animator.transform.Find("gfx/bdy_over").GetComponent<GenericSprite>();
         // Preserve the original's applied shadow state through the clone's delayed Awake.
         CastShadows(chains) = chains.SpriteRenderer.shadowCastingMode != UnityEngine.Rendering.ShadowCastingMode.Off;
         chains.gameObject.SetActive(false);
-        // Align with the empty shackles in the prison's left wall bay.
-        body.SetPosition(RaycastUtils.TrySnapToTheGround(primary.PhysicalBody.transform.position + SpawnOffset, 1f, 10f));
+        body.SetPosition(RaycastUtils.TrySnapToTheGround(primary.PhysicalBody.transform.position + offset, 1f, 10f));
         view.UpdatePosition(view.RoundedPosition);
         // Keep the animated and released chains on the same wall plane for consistent lighting.
-        chains.transform.position = MainGame.WorldData.gdPointsData.GetGDPointDataById("prison_wake_chain").Position + SpawnOffset;
+        chains.transform.position = MainGame.WorldData.gdPointsData.GetGDPointDataById("prison_wake_chain").Position + offset;
         keeper.SetActive(true);
         body.Init();
         body.Rb.isKinematic = true;
@@ -79,49 +92,35 @@ internal static class SecondKeeperSpawn
         animation.SetDirection(data.Direction);
         animation.SetState(AnimationState.Idle);
         animation.SetTrigger("mc_chained_start");
-        LazySingleton<Microphone>.Instance.SetTarget(primary.View.transform);
-    }
-
-    [HarmonyPostfix]
-    [HarmonyPatch(typeof(AnimationComponentBase), nameof(AnimationComponentBase.SetTrigger), new[] { typeof(string) })]
-    private static void MirrorChainAnimation(AnimationComponentBase __instance, string trigger)
-    {
-        if (animation != null && __instance == primary.View.PlayerAnimation &&
-            trigger.StartsWith("mc_chained_", System.StringComparison.Ordinal))
-            animation.SetTrigger(trigger);
+        var chainSequence = keeper.AddComponent<KeeperChains>();
+        chainSequence.Init(animation, chains.transform.position);
+        KeeperRescueTarget.Create(chainSequence, keeper.transform, body.transform.position);
+        return chainSequence;
     }
 
     [HarmonyPostfix]
     [HarmonyPatch(typeof(Wgo), nameof(Wgo.CompleteVisualPartsLoad))]
-    private static void LeaveShackles(Wgo __instance)
+    private static void CacheReleasedShackles(Wgo __instance)
     {
-        if (keeper == null || shackles != null || __instance.Data?.id != "intro_prison_chain" ||
+        if (keepers == null || __instance.Data?.id != "intro_prison_chain" ||
             __instance.MainWgoPart == null)
             return;
 
-        // The game leaves a separate wall visual after the release animation finishes.
         var source = __instance.MainWgoPart.GetComponentInChildren<SpriteRenderer>(true);
-        // Retire both renderers atomically; the skin updater can re-enable them later this frame.
-        var animatedView = animation.Animator.transform;
-        animatedView.Find("gfx/bdy_over").GetComponent<SpriteRenderer>().forceRenderingOff = true;
-        animatedView.Find("gfx (90 rotated)/-bdy_over").GetComponent<SpriteRenderer>().forceRenderingOff = true;
-        shackles = Object.Instantiate(source.gameObject, keeper.transform, true);
-        shackles.name = "Second Keeper Shackles";
-        shackles.transform.position += SpawnOffset;
+        foreach (var chainSequence in chainSequences)
+            chainSequence.SetReleasedShacklesSource(source);
     }
 
     private static void Clear()
     {
         PlayerController.OnPlayerTeleported -= Spawn;
         MainGame.OnGoToMainMenu -= Clear;
-        primary = null;
-        animation = null;
-        shackles = null;
-        if (keeper != null)
+        chainSequences = null;
+        if (keepers != null)
         {
-            keeper.SetActive(false);
-            Object.Destroy(keeper);
-            keeper = null;
+            keepers.SetActive(false);
+            Object.Destroy(keepers);
+            keepers = null;
         }
     }
 }

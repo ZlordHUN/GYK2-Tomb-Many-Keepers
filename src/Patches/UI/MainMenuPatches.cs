@@ -1,5 +1,5 @@
 using HarmonyLib;
-using GYK2.TombManyKeepers.Features.SecondKeeper;
+using GYK2.TombManyKeepers.Features.MultiplayerKeepers;
 using GYK2.TombManyKeepers.UI.Mods;
 using LazyBearTechnology;
 using TMPro;
@@ -24,7 +24,7 @@ internal static class MainMenuPatches
             button.onClick.RemoveListener(__instance.OnConsolesGameButtonClicked);
             button.onClick.AddListener(() =>
             {
-                SecondKeeperSpawn.Enable();
+                KeeperSpawn.Enable();
                 __instance.OnStartNewGameButtonClicked();
             });
             button.gameObject.SetActive(true);

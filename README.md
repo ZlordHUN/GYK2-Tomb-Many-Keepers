@@ -8,13 +8,13 @@ The functionality of both mods will be ported into GYK2. Players will be able to
 
 ## Features
 
-- Multiplayer button that starts a campaign with two keepers in the opening scene.
+- Multiplayer campaign opening with four keepers; rescue the others with the pickaxe.
 - Widescreen and ultrawide support, animated menu artwork and resolutions through 8K.
 - Mods menu listing installed plugins.
 - Left-click or Space to skip startup logos.
 
-The second keeper is a prototype: networking, second-player controls and save
-persistence are not implemented yet.
+The extra keepers are prototypes: networking, additional player controls and
+save persistence are not implemented yet.
 
 ## Install
 
