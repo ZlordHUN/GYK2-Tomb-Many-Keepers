@@ -1,8 +1,10 @@
 # Graveyard Keeper 2: Tomb Many Keepers
 
 An unofficial GYK2 mod, porting features from
-[GYK: Back From the Grave](https://github.com/ZlordHUN/GYK-Back-From-The-Grave).
+[GYK: Back From the Grave](https://github.com/ZlordHUN/GYK-Back-From-The-Grave) and [Graveyard Keeper Multiplayer](https://github.com/Zonda001/graveyard-keeper-multiplayer).
 **Version 0.1.**
+
+The functionality of both mods will be ported into GYK2. Players will be able to choose between the coop styles of both mods during Lobby setup.
 
 ## Features
 
