@@ -8,12 +8,15 @@ using UnityEngine.UI;
 
 namespace GYK2.TombManyKeepers.UI.Multiplayer;
 
-// The multiplayer screen swaps the main menu buttons for Host, Join and Back.
+// The multiplayer screen swaps the main menu buttons for Host Game, Join Game and Back.
 internal static class MultiplayerMenu
 {
     private static readonly List<GameObject> hidden = new List<GameObject>();
     private static LazyButton[] buttons;
     private static string closedReason;
+    // The campaign whose settings the host went back from, and the settings chosen for it.
+    private static SaveSlotData edited;
+    private static HostSettings editedSettings;
 
     internal static void Init(params LazyButton[] screenButtons)
     {
@@ -70,12 +73,33 @@ internal static class MultiplayerMenu
         }
     }
 
-    // Host first picks the campaign: a new game or a saved one.
-    internal static void Host(UIMainMenuWindow menu) => CampaignPicker.Open(menu);
-
-    internal static void Host(UIMainMenuWindow menu, SaveSlotData campaign)
+    // Host first picks the campaign, a new game or a saved one, then the settings it is hosted with.
+    internal static void Host(UIMainMenuWindow menu)
     {
-        if (!CoopSession.Host(campaign, out string error))
+        editedSettings = null;
+        CampaignPicker.Open(menu);
+    }
+
+    // A saved campaign starts from the settings it was last hosted with. Going back to the campaigns and
+    // on to the same one keeps the settings chosen for it.
+    internal static void Configure(UIMainMenuWindow menu, SaveSlotData campaign)
+    {
+        var settings = editedSettings != null && CampaignPicker.Same(edited, campaign) ? editedSettings : HostSettings.Of(campaign);
+        HostSettingsWindow.Open(settings, chosen =>
+        {
+            edited = campaign;
+            editedSettings = chosen;
+            CampaignPicker.Open(menu, keepPick: true);
+        }, chosen =>
+        {
+            editedSettings = null;
+            Host(menu, campaign, chosen);
+        });
+    }
+
+    private static void Host(UIMainMenuWindow menu, SaveSlotData campaign, HostSettings settings)
+    {
+        if (!CoopSession.Host(campaign, settings, out string error))
         {
             ShowError(menu, error);
             return;

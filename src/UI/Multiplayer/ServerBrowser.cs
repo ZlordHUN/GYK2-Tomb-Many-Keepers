@@ -55,7 +55,7 @@ internal sealed class ServerBrowser : MonoBehaviour
         string text = session == null
             ? listed.Count == 0 ? "Searching for games on your network..."
                 : string.Join("\n", listed.Select(game =>
-                    $"{game.Name}  {game.Players}/{CoopSession.MaxPlayers}  {(game.InLobby ? "In lobby" : "In game")}"))
+                    $"{game.Name}  {game.Players}/{game.Capacity}  {(game.InLobby ? "In lobby" : "In game")}"))
             : session.LocalSlot == 0 ? "Connecting..."
             : $"Joined as Keeper {session.LocalSlot}. Receiving the host's game...";
         if (message != null)

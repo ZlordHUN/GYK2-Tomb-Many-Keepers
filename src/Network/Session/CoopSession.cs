@@ -31,7 +31,7 @@ internal sealed class CoopSession : MonoBehaviour
     // The host is always the lobby's first keeper.
     internal const int HostSlot = 1;
     private const ushort GamePort = 34272;
-    private const byte Protocol = 7;
+    private const byte Protocol = 8;
     private const float StateInterval = 0.05f;
     // Reliable messages are limited to 512 KiB, so the game travels in parts.
     private const int WorldPartSize = 256 * 1024;
@@ -79,7 +79,8 @@ internal sealed class CoopSession : MonoBehaviour
         Rest,
         LoadStatus,
         LoadReport,
-        Cue
+        Cue,
+        Chat
     }
 
     private readonly Dictionary<HSteamNetConnection, int> peers = new Dictionary<HSteamNetConnection, int>();
@@ -119,6 +120,8 @@ internal sealed class CoopSession : MonoBehaviour
     private WorldSnapshot.Download arrived;
     private int arrivedFrame;
     private SaveSlotData campaign;
+    // Joined player: the hosted campaign's save card, for the lobby.
+    private SaveSlotData world;
     private bool newCampaign;
     private bool worldArrived;
     private bool released;
@@ -149,8 +152,13 @@ internal sealed class CoopSession : MonoBehaviour
     // A joined player asked to join the running game.
     internal bool Joining { get; private set; }
     internal string CampaignLabel { get; private set; }
+    // What the host chose on its settings screen; a joined player learns them on arriving.
+    internal HostSettings Settings { get; private set; } = new HostSettings();
     // Host: the saved campaign hosted, or none for a new one.
     internal SaveSlotData Campaign => campaign;
+    // The world the lobby shows: the saved campaign, or none for a new one. A joined player has a copy of its
+    // save card's details, not the save.
+    internal SaveSlotData World => IsHost ? campaign : world;
     // Joined players follow the host's campaign instead of their own.
     internal static bool IsGuest => Current != null && !Current.IsHost;
     internal static bool IsHosting => Current != null && Current.IsHost;
@@ -188,8 +196,8 @@ internal sealed class CoopSession : MonoBehaviour
         }
     }
 
-    // Hosts a lobby for a new campaign, or for the saved one given.
-    internal static bool Host(SaveSlotData saved, out string error)
+    // Hosts a lobby for a new campaign, or for the saved one given, with the host's settings.
+    internal static bool Host(SaveSlotData saved, HostSettings settings, out string error)
     {
         if (!Create(out error))
             return false;
@@ -214,6 +222,7 @@ internal sealed class CoopSession : MonoBehaviour
         session.InLobby = true;
         session.LocalSlot = HostSlot;
         session.campaign = saved;
+        session.Settings = settings.Copy();
         session.CampaignLabel = saved == null ? "New game" : $"Saved game, day {saved.day}";
         CharacterRecords.Clear();
         if (saved != null)
@@ -259,6 +268,7 @@ internal sealed class CoopSession : MonoBehaviour
         session.discovery?.Dispose();
         EntryBarrier.Cancel();
         EntryStatus.End();
+        LobbyChat.Clear();
         SharedPresentation.Clear();
         RemoteKeeper.Clear();
         WorldSync.Clear();
@@ -277,6 +287,9 @@ internal sealed class CoopSession : MonoBehaviour
     }
 
     internal string PlayerName(int slot) => names[slot];
+
+    // The player's Steam account, for their avatar; 0 while unknown.
+    internal ulong PlayerAccount(int slot) => accounts[slot];
 
     internal bool IsReady(int slot) => ready[slot];
 
@@ -446,7 +459,7 @@ internal sealed class CoopSession : MonoBehaviour
             return;
         if (IsHost)
         {
-            discovery.Reply(names[1], peers.Count + 1, InLobby, GamePort);
+            discovery.Reply(names[1], peers.Count + 1, Settings.Players, InLobby, GamePort);
             SendWorlds();
             ShareEntry();
             TryRelease();
@@ -590,6 +603,9 @@ internal sealed class CoopSession : MonoBehaviour
     {
         switch (message)
         {
+            case Message.Chat:
+                Relay(slot, LobbyChat.Clean(reader.ReadString()));
+                return false;
             case Message.Ready:
                 // Ready counts in the lobby, and for a later player before joining the running game.
                 if (!InLobby && (playing[slot] || awaitingWorld.Contains(connection)))
@@ -715,6 +731,8 @@ internal sealed class CoopSession : MonoBehaviour
                 LocalSlot = slot;
                 InLobby = reader.ReadBoolean();
                 CampaignLabel = reader.ReadString();
+                Settings = HostSettings.Read(reader);
+                world = ReadWorld(reader);
                 KeeperSpawn.EnableJoined(slot);
                 Debug.Log($"[Multiplayer] Joined as Keeper {slot}" + (InLobby ? " in the lobby" : " while the game runs"));
                 Admitted?.Invoke();
@@ -722,12 +740,16 @@ internal sealed class CoopSession : MonoBehaviour
             case Message.Refused:
                 Fail(reader.ReadString());
                 return true;
+            case Message.Chat:
+                LobbyChat.Add(slot, slot == 0 ? null : names[slot] ?? $"Keeper {slot}", LobbyChat.Clean(reader.ReadString()));
+                return true;
             case Message.Joined:
                 if (slot == 0)
                     return true;
                 names[slot] = reader.ReadString();
                 ready[slot] = reader.ReadBoolean();
                 chained[slot] = reader.ReadBoolean();
+                accounts[slot] = reader.ReadUInt64();
                 if (slot == LocalSlot || introduced[slot])
                     return true;
                 introduced[slot] = true;
@@ -891,6 +913,9 @@ internal sealed class CoopSession : MonoBehaviour
         if (peers.ContainsKey(connection))
             return;
         int slot = Array.IndexOf(names, null, 2);
+        // The host's settings limit how many keepers the game takes.
+        if (slot > Settings.Players)
+            slot = -1;
         // Games sharing one Steam account are told apart by their profiles.
         bool sharedAccount = Array.IndexOf(accounts, account, 1) >= 0;
         string key = PlayerIdentity.Key(account, profile, sharedAccount);
@@ -913,6 +938,8 @@ internal sealed class CoopSession : MonoBehaviour
         freed[slot] = false;
         Compose(Message.Welcome, slot).Write(InLobby);
         writer.Write(CampaignLabel);
+        Settings.Write(writer);
+        WriteWorld(writer, campaign);
         Send(connection, true);
         // The lobby shows who is here; a player joining a running game is announced as they enter it.
         for (int member = 1; member <= MaxPlayers; member++)
@@ -926,6 +953,32 @@ internal sealed class CoopSession : MonoBehaviour
             Announce(slot);
     }
 
+    // Something this player says in the lobby. The host relays every line to everyone, so all see one order.
+    internal void Say(string text)
+    {
+        text = LobbyChat.Clean(text);
+        if (text.Length == 0)
+            return;
+        if (IsHost)
+        {
+            Relay(LocalSlot, text);
+            return;
+        }
+        Compose(Message.Chat, LocalSlot).Write(text);
+        Send(host, true);
+    }
+
+    // Slot 0 is the host's notice of who came to the lobby or left it.
+    private void Relay(int slot, string text)
+    {
+        if (text.Length == 0 || slot != 0 && names[slot] == null)
+            return;
+        LobbyChat.Add(slot, slot == 0 ? null : names[slot], text);
+        Compose(Message.Chat, slot).Write(text);
+        foreach (var peer in peers)
+            Send(peer.Key, true);
+    }
+
     // Everyone learns about a player as they enter the lobby or the running game.
     private void Announce(int slot)
     {
@@ -933,6 +986,8 @@ internal sealed class CoopSession : MonoBehaviour
         WriteMember(Compose(Message.Joined, slot), slot);
         Broadcast(true);
         Notify(InLobby ? $"{names[slot]} joined the lobby" : $"{names[slot]} joined as Keeper {slot}");
+        if (InLobby)
+            Relay(0, $"{names[slot]} joined the lobby");
     }
 
     private void WriteMember(BinaryWriter member, int slot)
@@ -940,7 +995,33 @@ internal sealed class CoopSession : MonoBehaviour
         member.Write(names[slot]);
         member.Write(ready[slot]);
         member.Write(chained[slot]);
+        member.Write(accounts[slot]);
     }
+
+    // The hosted campaign's save card details for a joined player's lobby: when it was saved, the days
+    // played and the graveyard's, church's and village's standing.
+    private static void WriteWorld(BinaryWriter writer, SaveSlotData saved)
+    {
+        writer.Write(saved != null);
+        if (saved == null)
+            return;
+        writer.Write(saved.day);
+        writer.Write(saved.saveDateTime ?? string.Empty);
+        writer.Write(saved.serializedCulture ?? string.Empty);
+        writer.Write(saved.graveyardQuality);
+        writer.Write(saved.churchQuality);
+        writer.Write(saved.villageRep);
+    }
+
+    private static SaveSlotData ReadWorld(BinaryReader reader) => !reader.ReadBoolean() ? null : new SaveSlotData
+    {
+        day = reader.ReadInt32(),
+        saveDateTime = reader.ReadString(),
+        serializedCulture = reader.ReadString(),
+        graveyardQuality = reader.ReadInt32(),
+        churchQuality = reader.ReadInt32(),
+        villageRep = reader.ReadInt32()
+    };
 
     private void HostStarted()
     {
@@ -1198,6 +1279,8 @@ internal sealed class CoopSession : MonoBehaviour
         }
         if (introduced[slot])
             Notify(InLobby ? $"{names[slot]} left the lobby" : $"{names[slot]} left the game");
+        if (IsHost && InLobby && introduced[slot])
+            Relay(0, $"{names[slot]} left the lobby");
         names[slot] = null;
         keys[slot] = null;
         accounts[slot] = 0;

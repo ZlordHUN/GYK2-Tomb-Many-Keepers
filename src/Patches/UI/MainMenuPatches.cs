@@ -25,8 +25,8 @@ internal static class MainMenuPatches
             button.onClick.RemoveListener(__instance.OnConsolesGameButtonClicked);
             button.onClick.AddListener(() => MultiplayerMenu.Show(__instance, true));
             button.gameObject.SetActive(true);
-            var host = AddButton(___gameSettingsButton, button, "Host", () => MultiplayerMenu.Host(__instance));
-            var join = AddButton(___gameSettingsButton, host, "Join", () => MultiplayerMenu.Join(__instance));
+            var host = AddButton(___gameSettingsButton, button, "Host Game", () => MultiplayerMenu.Host(__instance));
+            var join = AddButton(___gameSettingsButton, host, "Join Game", () => MultiplayerMenu.Join(__instance));
             MultiplayerMenu.Init(host, join,
                 AddButton(___gameSettingsButton, join, "Back", () => MultiplayerMenu.Show(__instance, false)));
 

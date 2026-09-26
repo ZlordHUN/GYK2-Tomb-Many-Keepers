@@ -7,6 +7,7 @@ An unofficial GYK2 mod, porting features from
 ## Features
 
 - LAN co-op for up to four players: lobbies, new or saved campaigns, late joining and shared loading screens.
+- Configurable player limits, saved host settings, Steam avatars and lobby chat.
 - Persistent characters with personal inventories, points, talents and buffs.
 - Multiplayer prison opening; rescue the other keepers with the pickaxe.
 - Shared quests, unlocks and reputation, with story rewards for each player.
@@ -17,13 +18,19 @@ An unofficial GYK2 mod, porting features from
 - Mods menu listing installed plugins.
 - Left-click or Space to skip startup logos.
 
-Choose **Multiplayer → Host** and select a campaign. Other players choose
-**Join** and ready up. The host starts once everyone is ready; late joiners
-choose **Join Game**.
+Choose **Multiplayer → Host Game**, select a campaign, then **Next** to set
+the player limit (2–4). Choose **Next** again to open the lobby. Guests use
+**Join Game** and **Ready**; the host selects **Start Game** once everyone
+present is ready. Late joiners select **Ready → Join Game**.
+
+Chat with **Enter** or **Send**. Visibility and Cheats are saved placeholders:
+**Private/Friends does not restrict LAN access**. Keeper customization, invites
+and lobby codes are not available yet.
 
 Co-op is an early prototype. The host saves everyone's characters; keep the
-save's `.tmk` sidecar when backing up or moving a campaign. Workers, player trading
-and dungeon fighting levels are not supported yet. The session ends when the host leaves.
+save's `.tmk` and `.tmkhost` sidecars when backing up or moving a campaign.
+Workers, player trading and dungeon fighting levels are not supported yet.
+The session ends when the host leaves.
 
 ## Potential issues
 
@@ -33,7 +40,8 @@ and dungeon fighting levels are not supported yet. The session ends when the hos
 
 ## Install
 
-Targets **Graveyard Keeper 2 1.006** (Windows Mono) and **BepInEx 5.4.23.5 x64**.
+Targets **Graveyard Keeper 2** (Windows Mono, Steam build **25533739**)
+and **BepInEx 5.4.23.5 x64**.
 Use matching game and mod builds for all players. LAN play requires Steam running
 and UDP ports **34271** (discovery) and **34272** (game connection).
 

@@ -18,6 +18,8 @@ internal sealed class LanDiscovery : IDisposable
         internal IPEndPoint Endpoint;
         internal string Name;
         internal int Players;
+        // How many keepers the host's settings let the game take.
+        internal int Capacity;
         // Players can still join the lobby before the host starts the game.
         internal bool InLobby;
         internal float SeenAt;
@@ -26,7 +28,8 @@ internal sealed class LanDiscovery : IDisposable
     private const int Port = 34271;
     private const int MaxPackets = 32;
     private static readonly byte[] Probe = { (byte)'T', (byte)'M', (byte)'K', (byte)'?' };
-    private static readonly byte[] Answer = { (byte)'T', (byte)'M', (byte)'K', (byte)'!' };
+    // The last byte is the reply's format; games of another format ignore each other's replies.
+    private static readonly byte[] Answer = { (byte)'T', (byte)'M', (byte)'K', 2 };
 
     private readonly Socket socket = new Socket(AddressFamily.InterNetwork, SocketType.Dgram, ProtocolType.Udp);
     private readonly byte[] buffer = new byte[512];
@@ -53,7 +56,7 @@ internal sealed class LanDiscovery : IDisposable
             Send(Probe, new IPEndPoint(address, Port));
     }
 
-    internal void Reply(string name, int players, bool inLobby, ushort gamePort)
+    internal void Reply(string name, int players, int capacity, bool inLobby, ushort gamePort)
     {
         byte[] reply = null;
         while (TryReceive(out int length))
@@ -69,6 +72,7 @@ internal sealed class LanDiscovery : IDisposable
                     writer.Write(id);
                     writer.Write(gamePort);
                     writer.Write((byte)players);
+                    writer.Write((byte)capacity);
                     writer.Write(inLobby);
                     writer.Write(name);
                 }
@@ -92,6 +96,7 @@ internal sealed class LanDiscovery : IDisposable
             // Loopback and network answers from one host share its id; either address works.
             entry.Endpoint = new IPEndPoint(((IPEndPoint)sender).Address, reader.ReadUInt16());
             entry.Players = reader.ReadByte();
+            entry.Capacity = reader.ReadByte();
             entry.InLobby = reader.ReadBoolean();
             entry.Name = reader.ReadString();
             entry.SeenAt = Time.unscaledTime;
