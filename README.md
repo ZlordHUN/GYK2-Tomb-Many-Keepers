@@ -25,6 +25,12 @@ Co-op is an early prototype. The host saves everyone's characters; keep the
 save's `.tmk` sidecar when backing up or moving a campaign. Workers, player trading
 and dungeon fighting levels are not supported yet. The session ends when the host leaves.
 
+## Potential issues
+
+Overlapping station access may duplicate shared materials.
+Shared-account reconnects may select the wrong character.
+Concurrent world updates may lose changes or desynchronize players.
+
 ## Install
 
 Targets **Graveyard Keeper 2 1.006** (Windows Mono) and **BepInEx 5.4.23.5 x64**.
