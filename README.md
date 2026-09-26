@@ -27,9 +27,9 @@ and dungeon fighting levels are not supported yet. The session ends when the hos
 
 ## Potential issues
 
-Overlapping station access may duplicate shared materials.
-Shared-account reconnects may select the wrong character.
-Concurrent world updates may lose changes or desynchronize players.
+- Overlapping station access may duplicate shared materials.
+- Shared-account reconnects may select the wrong character.
+- Concurrent world updates may lose changes or desynchronize players.
 
 ## Install
 
