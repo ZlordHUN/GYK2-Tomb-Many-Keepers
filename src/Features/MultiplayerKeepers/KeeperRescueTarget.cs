@@ -21,12 +21,14 @@ internal sealed class KeeperRescueTarget : MonoBehaviour
         AccessTools.FieldRefAccess<AnimationComponentBase, System.Action<ItemType>>("OnToolLoopFinished");
 
     private KeeperChains chains;
+    private System.Action hit;
     private Wgo target;
     private DockPoint dock;
     private ToolComponent finishingTool;
     private bool retiring;
 
-    internal static void Create(KeeperChains chains, Transform parent, Vector3 position)
+    // Each pickaxe hit runs the given action: cutting the shackles, or asking the game that decides.
+    internal static void Create(KeeperChains chains, Transform parent, Vector3 position, System.Action hit)
     {
         var definition = new WGODef
         {
@@ -68,6 +70,7 @@ internal sealed class KeeperRescueTarget : MonoBehaviour
         }
         var rescue = wgo.gameObject.AddComponent<KeeperRescueTarget>();
         rescue.chains = chains;
+        rescue.hit = hit;
         rescue.target = wgo;
         var point = new GameObject("Rescue Work Point") { layer = 7 };
         point.transform.SetParent(wgo.MainWgoPart.transform, false);
@@ -85,7 +88,7 @@ internal sealed class KeeperRescueTarget : MonoBehaviour
 
     private void ApplyHit(bool isFirstHit)
     {
-        chains.ApplyPickaxeHit();
+        hit();
         if (target.Data.HpComponent.Hp == 0)
             Retire();
     }

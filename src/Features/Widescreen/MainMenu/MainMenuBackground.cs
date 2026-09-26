@@ -38,7 +38,7 @@ internal sealed class MainMenuBackground : MonoBehaviour
         sprite = Sprite.Create(texture, new Rect(0, 0, texture.width, texture.height),
             Vector2.one * 0.5f, PixelsPerUnit, 0, SpriteMeshType.FullRect);
         renderer.sprite = sprite;
-        renderer.sharedMaterial = transform.Find("titlescreen-1x").GetComponent<SpriteRenderer>().sharedMaterial;
+        // Use the built-in sprite material; the game's unused titlescreen-1x object was removed.
         layers = new MainMenuArtworkLayers(transform, artwork.transform, texture);
         texture.Apply(false, true);
     }
