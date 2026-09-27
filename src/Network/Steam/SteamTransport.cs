@@ -7,7 +7,8 @@ using UnityEngine;
 
 namespace GYK2.TombManyKeepers.Network.Steam;
 
-// Messages over Steam networking sockets. LAN peers connect by IP address.
+// Messages over Steam networking sockets. LAN peers connect by IP address, online players through Steam's network by
+// the host's account, which Steam vouches for at both ends.
 internal sealed class SteamTransport : IDisposable
 {
     private const int MaxBatch = 64;
@@ -28,6 +29,7 @@ internal sealed class SteamTransport : IDisposable
     private readonly HashSet<HSteamNetConnection> connections = new HashSet<HSteamNetConnection>();
     private readonly IntPtr[] batch = new IntPtr[MaxBatch];
     private HSteamListenSocket listenSocket = HSteamListenSocket.Invalid;
+    private HSteamListenSocket onlineSocket = HSteamListenSocket.Invalid;
     private byte[] received = new byte[512];
     private IntPtr sendBuffer = IntPtr.Zero;
     private int sendCapacity;
@@ -47,6 +49,13 @@ internal sealed class SteamTransport : IDisposable
         return listenSocket != HSteamListenSocket.Invalid;
     }
 
+    // Takes players reaching this game through Steam's network by this account.
+    internal bool ListenOnline()
+    {
+        onlineSocket = SteamNetworkingSockets.CreateListenSocketP2P(0, Options.Length, Options);
+        return onlineSocket != HSteamListenSocket.Invalid;
+    }
+
     internal HSteamNetConnection Connect(IPEndPoint endpoint)
     {
         var address = new SteamNetworkingIPAddr { m_ipv6 = new byte[16] };
@@ -55,6 +64,22 @@ internal sealed class SteamTransport : IDisposable
         Track(connection);
         return connection;
     }
+
+    // Reaches the game hosted by this Steam account through Steam's network; invalid when Steam refuses at once, as it
+    // does for the player's own account.
+    internal HSteamNetConnection Connect(ulong account)
+    {
+        var identity = new SteamNetworkingIdentity();
+        identity.SetSteamID64(account);
+        var connection = SteamNetworkingSockets.ConnectP2P(ref identity, 0, Options.Length, Options);
+        if (connection != HSteamNetConnection.Invalid)
+            Track(connection);
+        return connection;
+    }
+
+    // The Steam account Steam vouches for at the connection's other end, or 0 for a LAN peer without one.
+    internal ulong Account(HSteamNetConnection connection) =>
+        SteamNetworkingSockets.GetConnectionInfo(connection, out var info) ? info.m_identityRemote.GetSteamID64() : 0;
 
     internal bool Send(HSteamNetConnection connection, byte[] data, int offset, int length, bool reliable)
     {
@@ -112,6 +137,8 @@ internal sealed class SteamTransport : IDisposable
         connections.Clear();
         if (listenSocket != HSteamListenSocket.Invalid)
             SteamNetworkingSockets.CloseListenSocket(listenSocket);
+        if (onlineSocket != HSteamListenSocket.Invalid)
+            SteamNetworkingSockets.CloseListenSocket(onlineSocket);
         SteamNetworkingSockets.DestroyPollGroup(pollGroup);
         Marshal.FreeHGlobal(sendBuffer);
     }
@@ -129,7 +156,8 @@ internal sealed class SteamTransport : IDisposable
         {
             case ESteamNetworkingConnectionState.k_ESteamNetworkingConnectionState_Connecting:
                 // Outgoing connections report no listen socket.
-                if (listenSocket == HSteamListenSocket.Invalid || status.m_info.m_hListenSocket != listenSocket)
+                var socket = status.m_info.m_hListenSocket;
+                if (socket == HSteamListenSocket.Invalid || socket != listenSocket && socket != onlineSocket)
                     return;
                 if (SteamNetworkingSockets.AcceptConnection(connection) == EResult.k_EResultOK)
                     Track(connection);

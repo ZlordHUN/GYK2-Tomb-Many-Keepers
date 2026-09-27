@@ -36,11 +36,14 @@ jobs:
           cp bin/Release/netstandard2.1/GYK2.TombManyKeepers.dll \
             "$RUNNER_TEMP/package/BepInEx/plugins/GYK2.TombManyKeepers/"
           cp README.md LICENSE "$RUNNER_TEMP/package/"
+          mkdir -p "$RUNNER_TEMP/package/assets/MainMenu"
+          cp assets/MainMenu/ModTitle.png "$RUNNER_TEMP/package/assets/MainMenu/"
           printf 'Commit: %s\nWorkflow run: %s\n' "$GITHUB_SHA" "$GITHUB_RUN_NUMBER" \
             > "$RUNNER_TEMP/package/BUILD.txt"
           cd "$RUNNER_TEMP/package"
           zip -q "$RUNNER_TEMP/GYK2.TombManyKeepers-nightly.zip" \
-            BepInEx/plugins/GYK2.TombManyKeepers/GYK2.TombManyKeepers.dll README.md LICENSE BUILD.txt
+            BepInEx/plugins/GYK2.TombManyKeepers/GYK2.TombManyKeepers.dll \
+            README.md assets/MainMenu/ModTitle.png LICENSE BUILD.txt
 
       - name: Publish nightly
         env:

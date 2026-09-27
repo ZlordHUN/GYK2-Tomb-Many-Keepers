@@ -20,10 +20,15 @@
 !/assets/
 !/assets/MainMenu/
 !/assets/MainMenu/WideBackground.png
+!/assets/MainMenu/ModTitle.png
 
 !/build/
 !/build/UnityMod.props
 !/build/Local.props.example
+
+# Manual launcher; runtime probes and their outputs remain local.
+!/tests/
+!/tests/run-second-instance.sh
 
 # Generated directories remain local even when they contain source files.
 bin/

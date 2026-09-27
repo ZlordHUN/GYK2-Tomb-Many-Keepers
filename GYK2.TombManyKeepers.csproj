@@ -12,7 +12,8 @@
   <ItemGroup>
     <Compile Include="src/**/*.cs" Exclude="src/**/bin/**;src/**/obj/**" />
     <EmbeddedResource Include="assets/MainMenu/WideBackground.png" LogicalName="GYK2.TombManyKeepers.WideBackground.png" />
-    <Reference Include="AstarPathfindingProject;com.rlabrecque.steamworks.net;Sirenix.Serialization;Sirenix.Serialization.Config;Unity.TextMeshPro;UnityEngine.UI;UnityEngine.InputLegacyModule;UnityEngine.PhysicsModule;UnityEngine.AnimationModule;UnityEngine.ImageConversionModule;UnityEngine.ParticleSystemModule;UnityEngine.UIModule;UnityEngine.TextRenderingModule;Cinemachine">
+    <EmbeddedResource Include="assets/MainMenu/ModTitle.png" LogicalName="GYK2.TombManyKeepers.ModTitle.png" />
+    <Reference Include="AstarPathfindingProject;com.rlabrecque.steamworks.net;Sirenix.Serialization;Sirenix.Serialization.Config;Unity.TextMeshPro;UnityEngine.UI;UnityEngine.InputLegacyModule;UnityEngine.PhysicsModule;UnityEngine.AnimationModule;UnityEngine.ImageConversionModule;UnityEngine.ParticleSystemModule;UnityEngine.UIModule;UnityEngine.TextRenderingModule;Unity.Addressables;Unity.ResourceManager;Cinemachine">
       <HintPath>$(ManagedDir)/%(Identity).dll</HintPath>
       <Private>false</Private>
     </Reference>

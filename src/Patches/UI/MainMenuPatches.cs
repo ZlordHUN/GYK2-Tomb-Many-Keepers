@@ -1,4 +1,5 @@
 using HarmonyLib;
+using GYK2.TombManyKeepers.UI.MainMenu;
 using GYK2.TombManyKeepers.UI.Mods;
 using GYK2.TombManyKeepers.UI.Multiplayer;
 using LazyBearTechnology;
@@ -27,7 +28,7 @@ internal static class MainMenuPatches
             button.gameObject.SetActive(true);
             var host = AddButton(___gameSettingsButton, button, "Host Game", () => MultiplayerMenu.Host(__instance));
             var join = AddButton(___gameSettingsButton, host, "Join Game", () => MultiplayerMenu.Join(__instance));
-            MultiplayerMenu.Init(host, join,
+            MultiplayerMenu.Init(__instance, host, join,
                 AddButton(___gameSettingsButton, join, "Back", () => MultiplayerMenu.Show(__instance, false)));
 
             // Open() must no longer treat this button as the console save-slot entry.
@@ -36,6 +37,7 @@ internal static class MainMenuPatches
 
         if (___gameSettingsButton.transform.parent.Find("Mods") == null)
             AddButton(___gameSettingsButton, ___gameSettingsButton, "Mods", () => ModsWindow.Open(__instance));
+        ModTitle.Add(__instance);
     }
 
     [HarmonyPostfix]

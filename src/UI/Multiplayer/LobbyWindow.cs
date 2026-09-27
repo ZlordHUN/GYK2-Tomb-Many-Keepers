@@ -1,7 +1,9 @@
 using System.Collections.Generic;
+using System.Net;
 using System.Text;
 using GYK2.TombManyKeepers.Multiplayer.Session;
 using GYK2.TombManyKeepers.Network.Session;
+using GYK2.TombManyKeepers.Network.Steam;
 using HarmonyLib;
 using LazyBearTechnology;
 using TMPro;
@@ -13,7 +15,9 @@ namespace GYK2.TombManyKeepers.UI.Multiplayer;
 // The lobby, laid out as GYK1's over the menu's backdrop: its title and commands above, the players and the
 // world being hosted on the left, the chat with its field and Send on the right, and Back and Start Game
 // together in the middle along the bottom. Send sits beside the field, clear of the game's credits in the
-// corner below.
+// corner below. Invite opens the friends to invite to the game; a screen wide enough shows them outright in a
+// column of their own on the right, the rest moved left to make room, and the Invite command goes, as does Show
+// Lobby Code, whose line stands under the world instead, in the chat field's row.
 // Everything is a copy of the game's own header plates, cells, text fields, buttons and save card. Joined
 // players ready up and the host starts once everyone is ready; a later player readies up in the running
 // game's lobby and joins it.
@@ -26,13 +30,32 @@ internal sealed class LobbyWindow : LazyWindow<LazyWidgetDataBase>
     private const float PanelTop = 109f, PlayersHeight = 76f, WorldTop = 220f, WorldHeight = 53f;
     private const float ChatHeight = 163f, SayHeight = 24f, TextLine = 12f, LineGap = 2f;
     private const float AvatarRetry = 0.5f;
+    // The layout's width with and without the friends column, the column's centre, as far right of the chat as the
+    // players are left of it, and the screen width from which it fits with room to spare. Friends are listed again
+    // this often.
+    private const float NarrowWidth = 640f, WideWidth = 980f, FriendsColumn = 830f, WideScreen = 1060f;
+    private const float FriendHeight = 36f, FriendGap = 6f, FriendPadding = 8f, Relisting = 5f;
     private const string SystemTag = "#E8A33E", SystemText = "#CFC9C0", NameColor = "#FFBD00", SaidColor = "#DDD3C0";
+    private const string CodeColor = "#968D88";
     private static readonly AccessTools.FieldRef<UISaveSlotsWindow, UISaveSlot> SaveCard =
         AccessTools.FieldRefAccess<UISaveSlotsWindow, UISaveSlot>("uiSaveSlotPrefab");
     private static LobbyWindow instance;
 
+    private readonly HashSet<ulong> invited = new HashSet<ulong>();
     private UIMainMenuWindow menu;
     private RectTransform layout;
+    private RectTransform title;
+    private RectTransform commands;
+    private RectTransform bottom;
+    private GameObject inviteCommand;
+    private GameObject codeCommand;
+    private GameObject codeLine;
+    private GameObject friendsColumn;
+    private FriendsList friends;
+    private UIDialogWindowButton inviteButton;
+    private Image cell;
+    private bool? wide;
+    private float nextListing;
     private LobbyPlayers players;
     private GameObject card;
     private TMP_Text log;
@@ -77,14 +100,15 @@ internal sealed class LobbyWindow : LazyWindow<LazyWidgetDataBase>
         var cell = field.GetComponent<Image>();
         var selection = SaveCard(LazyUI.GetWindow<UISaveSlotsWindow>()).transform.Find("Selection").GetComponent<Image>();
 
-        NativeWindow.Plate(plate, layout, "MULTIPLAYER LOBBY", Centre, TitleRow, TitleWidth);
+        window.cell = cell;
+        window.title = (RectTransform)NativeWindow.Plate(plate, layout, "MULTIPLAYER LOBBY", Centre, TitleRow, TitleWidth).transform.parent;
         var commands = NativeWindow.ButtonRow(layout);
+        window.commands = (RectTransform)commands;
         commands.GetComponent<HorizontalLayoutGroup>().spacing = 24f;
         NativeWindow.Place(commands, Centre, CommandRow, 0f, 0f);
         Navigable(NativeWindow.Button(button, commands, "Keepers", () => Notice("Keeper customization comes in a later version.")));
-        Navigable(NativeWindow.Button(button, commands, "Invite",
-            () => Notice("Invites come with online play. Players on your network find this game under Join Game.")));
-        Navigable(NativeWindow.Button(button, commands, "Show Lobby Code", () => Notice("Lobby codes come with online play.")));
+        window.inviteCommand = Navigable(NativeWindow.Button(button, commands, "Invite", window.OpenInvites)).gameObject;
+        window.codeCommand = Navigable(NativeWindow.Button(button, commands, "Show Lobby Code", () => Notice("Lobby codes come later."))).gameObject;
 
         NativeWindow.Plate(plate, layout, "Players", LeftColumn, PlateRow, PlateWidth);
         var panel = NativeWindow.Cell(cell, layout, "Players panel");
@@ -106,13 +130,95 @@ internal sealed class LobbyWindow : LazyWindow<LazyWidgetDataBase>
         Navigable(Placed(NativeWindow.Button(button, NativeWindow.ButtonRow(layout), "Send", () => window.Say(window.input.text)),
             RightColumn + PanelWidth / 2f - SendWidth / 2f, SayRow));
 
+        AddFriends(window, plate, cell, line, button);
+        AddCode(window, cell, line);
+
         var bottom = NativeWindow.ButtonRow(layout);
+        window.bottom = (RectTransform)bottom;
         bottom.GetComponent<HorizontalLayoutGroup>().spacing = 24f;
         NativeWindow.Place(bottom, Centre, BottomRow, 0f, 0f);
         Navigable(NativeWindow.Button(button, bottom, LLBase.L("tip_back"), window.Back));
         window.main = Navigable(NativeWindow.Button(button, bottom, "Start Game", null));
         window.Init();
         return window;
+    }
+
+    // A wide screen's lobby code, in a dark cell under the world, in the chat field's row: until lobby codes come, a
+    // line saying so.
+    private static void AddCode(LobbyWindow window, Image cell, TMP_Text line)
+    {
+        var box = NativeWindow.Cell(cell, window.layout, "Lobby code");
+        NativeWindow.Place(box.transform, LeftColumn, SayRow, PanelWidth, NativeWindow.FieldHeight);
+        var text = Object.Instantiate(line, box.transform);
+        text.name = "Text";
+        Object.DestroyImmediate(text.GetComponent<TextStyleComponent>());
+        text.gameObject.SetActive(true);
+        text.richText = true;
+        text.alignment = TextAlignmentOptions.Center;
+        text.textWrappingMode = TextWrappingModes.NoWrap;
+        text.margin = Vector4.zero;
+        text.rectTransform.anchorMin = Vector2.zero;
+        text.rectTransform.anchorMax = Vector2.one;
+        text.rectTransform.offsetMin = text.rectTransform.offsetMax = Vector2.zero;
+        NativeWindow.SetText(text, $"<color={NameColor}>Lobby code:</color> <color={CodeColor}>comes later</color>");
+        window.codeLine = box.gameObject;
+        window.codeLine.SetActive(false);
+    }
+
+    // The friends column of a wide screen: its plate, the friends in the game's dark cell, scrolled as the chat is,
+    // and Refresh and Invite beneath, beside the chat's field.
+    private static void AddFriends(LobbyWindow window, Transform plate, Image cell, TMP_Text line, UIDialogWindowButton button)
+    {
+        var column = new GameObject("Friends column", typeof(RectTransform)).GetComponent<RectTransform>();
+        column.SetParent(window.layout, false);
+        column.anchorMin = Vector2.zero;
+        column.anchorMax = Vector2.one;
+        column.offsetMin = column.offsetMax = Vector2.zero;
+        window.friendsColumn = column.gameObject;
+        NativeWindow.Plate(plate, column, "Invite Friends", FriendsColumn, PlateRow, PlateWidth);
+        var panel = NativeWindow.Cell(cell, column, "Friends panel");
+        NativeWindow.Place(panel.transform, FriendsColumn, PanelTop + ChatHeight / 2f, PanelWidth, ChatHeight);
+        var viewport = new GameObject("Viewport", typeof(RectTransform), typeof(RectMask2D)).GetComponent<RectTransform>();
+        viewport.SetParent(panel.transform, false);
+        viewport.anchorMin = Vector2.zero;
+        viewport.anchorMax = Vector2.one;
+        viewport.offsetMin = viewport.offsetMax = Vector2.zero;
+        var list = new GameObject("Friends", typeof(RectTransform), typeof(GridLayoutGroup), typeof(ContentSizeFitter)).GetComponent<RectTransform>();
+        list.SetParent(viewport, false);
+        list.anchorMin = new Vector2(0f, 1f);
+        list.anchorMax = Vector2.one;
+        list.pivot = new Vector2(0.5f, 1f);
+        list.sizeDelta = Vector2.zero;
+        var grid = list.GetComponent<GridLayoutGroup>();
+        grid.padding = new RectOffset((int)FriendPadding, (int)FriendPadding, (int)FriendPadding, (int)FriendPadding);
+        grid.cellSize = new Vector2(PanelWidth - 2f * FriendPadding, FriendHeight);
+        grid.spacing = new Vector2(0f, FriendGap);
+        grid.constraint = GridLayoutGroup.Constraint.FixedColumnCount;
+        grid.constraintCount = 1;
+        list.GetComponent<ContentSizeFitter>().verticalFit = ContentSizeFitter.FitMode.PreferredSize;
+        var scroll = panel.gameObject.AddComponent<ScrollRect>();
+        scroll.viewport = viewport;
+        scroll.content = list;
+        scroll.horizontal = false;
+        scroll.movementType = ScrollRect.MovementType.Clamped;
+        scroll.inertia = false;
+        SmoothMouseWheelScroll.Ensure(scroll, FriendHeight + FriendGap);
+        var notice = Object.Instantiate(line, viewport);
+        notice.name = "Notice";
+        Object.DestroyImmediate(notice.GetComponent<TextStyleComponent>());
+        notice.gameObject.SetActive(true);
+        notice.alignment = TextAlignmentOptions.Center;
+        notice.color = new Color(0.588f, 0.553f, 0.533f);
+        notice.rectTransform.anchorMin = Vector2.zero;
+        notice.rectTransform.anchorMax = Vector2.one;
+        notice.rectTransform.offsetMin = notice.rectTransform.offsetMax = Vector2.zero;
+        window.friends = new FriendsList(list, SaveCard(LazyUI.GetWindow<UISaveSlotsWindow>()), cell, notice, window.Invite);
+        var actions = NativeWindow.ButtonRow(column);
+        actions.GetComponent<HorizontalLayoutGroup>().spacing = 20f;
+        NativeWindow.Place(actions, FriendsColumn, SayRow, 0f, 0f);
+        Navigable(NativeWindow.Button(button, actions, "Refresh", window.ListFriends));
+        window.inviteButton = Navigable(NativeWindow.Button(button, actions, "Invite", () => window.Invite(window.friends.Picked)));
+        column.gameObject.SetActive(false);
     }
 
     // Each button stands in a row of its own, which sizes it to its label.
@@ -193,6 +299,10 @@ internal sealed class LobbyWindow : LazyWindow<LazyWidgetDataBase>
     public override void Open(LazyWidgetDataBase data)
     {
         base.Open(data);
+        invited.Clear();
+        wide = null;
+        layout.gameObject.SetActive(true);
+        Arrange();
         input.text = string.Empty;
         var session = CoopSession.Current;
         ShowWorld(session.World);
@@ -244,10 +354,112 @@ internal sealed class LobbyWindow : LazyWindow<LazyWidgetDataBase>
         base.Update();
         if (!IsShown)
             return;
+        Arrange();
+        if (wide == true && Time.unscaledTime >= nextListing)
+            ListFriends();
+        if (wide == true)
+        {
+            inviteButton.LazyButton.interactable = friends.Picked != 0;
+            // A gamepad reaches the friends shown now; its focus stays where it was, or, if its card went, starts over.
+            if (IsShownAndTop && friends.TakeChanges())
+            {
+                var focused = GamepadNavigationController.FocusedItem;
+                bool kept = focused != null && focused.gameObject.activeInHierarchy;
+                GamepadNavigationController.ReinitItems(!kept && LazyInput.IsGamepadActive, skipUnfocusItem: kept ? focused : null);
+            }
+        }
         Refresh();
         // Steam can take a moment to send a player's avatar.
         if (avatarsPending && Time.unscaledTime >= nextAvatarCheck && CoopSession.Current != null)
             DrawPlayers(CoopSession.Current);
+    }
+
+    // The friends column shows where the screen is wide enough for it, the layout widened to make room: the
+    // columns keep their places, so they move left, and the title, commands and bottom buttons stay in the middle.
+    private void Arrange()
+    {
+        bool fits = ((RectTransform)transform).rect.width >= WideScreen;
+        if (wide == fits)
+            return;
+        wide = fits;
+        float centre = (fits ? WideWidth : NarrowWidth) / 2f;
+        layout.sizeDelta = new Vector2(fits ? WideWidth : NarrowWidth, layout.sizeDelta.y);
+        foreach (var part in new[] { title, commands, bottom })
+            part.anchoredPosition = new Vector2(centre, part.anchoredPosition.y);
+        inviteCommand.SetActive(!fits);
+        codeCommand.SetActive(!fits);
+        friendsColumn.SetActive(fits);
+        codeLine.SetActive(fits);
+        if (fits)
+        {
+            InviteWindow.CloseIfOpen();
+            ListFriends();
+        }
+        layout.RefreshContentFitter();
+        GamepadNavigationController.ReinitItems(focusOnFirstActive: LazyInput.IsGamepadActive);
+    }
+
+    private void ListFriends()
+    {
+        friends.Show(InLobby, invited.Contains);
+        nextListing = Time.unscaledTime + (friends.AvatarsPending ? AvatarRetry : Relisting);
+    }
+
+    private static bool InLobby(ulong account)
+    {
+        var session = CoopSession.Current;
+        for (int slot = 1; session != null && slot <= CoopSession.MaxPlayers; slot++)
+            if (session.PlayerAccount(slot) == account)
+                return true;
+        return false;
+    }
+
+    // Invite on a narrow screen: the friends' window over the lobby, which steps aside until it closes.
+    private void OpenInvites()
+    {
+        layout.gameObject.SetActive(false);
+        InviteWindow.Open(cell, Invite, InLobby, invited.Contains, () =>
+        {
+            layout.gameObject.SetActive(true);
+            layout.RefreshContentFitter();
+            GamepadNavigationController.ReinitItems(focusOnFirstActive: LazyInput.IsGamepadActive);
+        });
+    }
+
+    // Sends a friend Steam's invite to this lobby's game. Their game looks for the host at the addresses the host
+    // is reached at: this machine's for the host, or the address a joined player reached the host at. A player who
+    // joined through Steam's network knows no address to give.
+    private void Invite(ulong friend)
+    {
+        var session = CoopSession.Current;
+        if (session == null || friend == 0)
+            return;
+        var host = session.HostEndpoint;
+        if (!session.IsHost && host == null)
+        {
+            Notice("Inviting to a game joined online comes later.");
+            return;
+        }
+        bool reached = host != null && !IPAddress.IsLoopback(host.Address);
+        var addresses = reached ? new List<IPAddress> { host.Address } : GameInvites.LocalAddresses();
+        ushort port = host != null ? (ushort)host.Port : CoopSession.GamePort;
+        string name = friends.NameOf(friend);
+        if (addresses.Count == 0)
+        {
+            Notice($"This computer has no network address to invite {name} to.");
+            return;
+        }
+        if (!GameInvites.Send(friend, session.PlayerAccount(CoopSession.HostSlot), port, session.LobbyKey, addresses))
+        {
+            Notice($"Steam did not send the invite to {name}.");
+            return;
+        }
+        bool first = invited.Count == 0;
+        invited.Add(friend);
+        Notice(first ? $"Invited {name}. For now, invited friends join from your network or a VPN." : $"Invited {name}.");
+        if (wide == true)
+            ListFriends();
+        InviteWindow.Relist();
     }
 
     private void DrawPlayers(CoopSession session)
@@ -412,6 +624,8 @@ internal sealed class LobbyWindow : LazyWindow<LazyWidgetDataBase>
 
     private void Leave()
     {
+        InviteWindow.CloseIfOpen();
+        layout.gameObject.SetActive(true);
         CoopSession.Loading -= Enter;
         CoopSession.Failed -= Report;
         LobbyChat.Changed -= DrawChat;

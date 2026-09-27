@@ -2,29 +2,36 @@ using System;
 using System.Collections.Generic;
 using GYK2.TombManyKeepers.Multiplayer.World;
 using GYK2.TombManyKeepers.Network.Session;
+using GYK2.TombManyKeepers.Network.Steam;
 using LazyBearTechnology;
 using UnityEngine;
 using UnityEngine.UI;
 
 namespace GYK2.TombManyKeepers.UI.Multiplayer;
 
-// The multiplayer screen swaps the main menu buttons for Host Game, Join Game and Back.
+// The multiplayer screen swaps the main menu buttons for Host Game, Join Game and Back. An invite the player
+// accepts opens Join Game to follow it, at once from the main menu or once the player returns there.
 internal static class MultiplayerMenu
 {
     private static readonly List<GameObject> hidden = new List<GameObject>();
+    private static UIMainMenuWindow mainMenu;
     private static LazyButton[] buttons;
     private static string closedReason;
     // The campaign whose settings the host went back from, and the settings chosen for it.
     private static SaveSlotData edited;
     private static HostSettings editedSettings;
 
-    internal static void Init(params LazyButton[] screenButtons)
+    internal static void Init(UIMainMenuWindow menu, params LazyButton[] screenButtons)
     {
+        mainMenu = menu;
         buttons = screenButtons;
         foreach (var button in buttons)
             button.gameObject.SetActive(false);
         CoopSession.Closed -= ReturnToMenu;
         CoopSession.Closed += ReturnToMenu;
+        GameInvites.Arrived -= InviteArrived;
+        GameInvites.Arrived += InviteArrived;
+        GameInvites.Listen();
     }
 
     internal static void Show(UIMainMenuWindow menu, bool visible)
@@ -70,7 +77,53 @@ internal static class MultiplayerMenu
             string reason = closedReason;
             closedReason = null;
             ShowError(menu, reason);
+            return;
         }
+        FollowInvite(menu);
+    }
+
+    // An accepted invite waiting for the main menu is followed once it shows. It is taken first: leaving the
+    // multiplayer screen refreshes the menu, which would follow it again.
+    private static void FollowInvite(UIMainMenuWindow menu)
+    {
+        if (GameInvites.Pending == null || CoopSession.Current != null || !menu.IsShownAndTop)
+            return;
+        var invite = GameInvites.Take();
+        Show(menu, false);
+        ServerBrowser.Open(menu, invite);
+    }
+
+    // An invite accepted while the game runs: followed from the main menu or the browser, kept for later during
+    // a game of one's own, and set aside in a multiplayer game.
+    private static void InviteArrived()
+    {
+        if (CoopSession.Current != null)
+        {
+            GameInvites.Take();
+            Note("You are already in a multiplayer game. Leave it to accept an invite.");
+            return;
+        }
+        if (ServerBrowser.Accept(GameInvites.Pending))
+        {
+            GameInvites.Take();
+            return;
+        }
+        if (MainGame.Instance != null && MainGame.Instance.gameState != MainGame.GameState.MainMenu)
+        {
+            Note("The invite opens Join Game when you return to the main menu.");
+            return;
+        }
+        if (mainMenu != null)
+            FollowInvite(mainMenu);
+    }
+
+    private static void Note(string text)
+    {
+        var window = LazyUI.GetWindow<UIDialogWindow>();
+        if (window.IsShown)
+            window.CloseWithoutCallback();
+        window.Open(new UIDialogWindowData("Multiplayer", text,
+            new UIDialogWindowData.ButtonData(window.Close, LLBase.L("btn_ok"), keyToReplace: GameKey.Back)));
     }
 
     // Host first picks the campaign, a new game or a saved one, then the settings it is hosted with.

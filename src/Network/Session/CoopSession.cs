@@ -30,8 +30,8 @@ internal sealed class CoopSession : MonoBehaviour
     internal const int MaxPlayers = 4;
     // The host is always the lobby's first keeper.
     internal const int HostSlot = 1;
-    private const ushort GamePort = 34272;
-    private const byte Protocol = 8;
+    internal const ushort GamePort = 34272;
+    internal const byte Protocol = 9;
     private const float StateInterval = 0.05f;
     // Reliable messages are limited to 512 KiB, so the game travels in parts.
     private const int WorldPartSize = 256 * 1024;
@@ -114,6 +114,8 @@ internal sealed class CoopSession : MonoBehaviour
     private BinaryWriter writer;
     private SteamTransport transport;
     private LanDiscovery discovery;
+    // Host: the game's online listing, while Steam's network takes players.
+    private SteamLobbies listing;
     private HSteamNetConnection host;
     private WorldSnapshot.Download download;
     // The host's game has arrived; it loads once the loading screen has shown so.
@@ -134,6 +136,8 @@ internal sealed class CoopSession : MonoBehaviour
     private float nextEntryStatus;
     // Joined: when the host last sent anything towards this player's entry.
     private float hostContact;
+    // What a joining player gives when the host asks for a password.
+    private string joinPassword = string.Empty;
     private float nextReceiveReport;
 
     internal static CoopSession Current { get; private set; }
@@ -141,9 +145,16 @@ internal sealed class CoopSession : MonoBehaviour
     // A joined player's entry into the host's game begins: the host started, or this player asked to join.
     internal static event Action Loading;
     internal static event Action<string> Failed;
+    // The host asked for its password, or a different one than this player gave.
+    internal static event Action<string> PasswordRefused;
     // A joined game lost its host after it started loading.
     internal static event Action<string> Closed;
     internal bool IsHost { get; private set; }
+    // Where a joined player reached the host, or null for a host reached through Steam's network.
+    internal IPEndPoint HostEndpoint { get; private set; }
+    // The lobby's key, which an invite carries: it lets its friend find a private game and join past a password.
+    // The host makes it; a joined player learns it on arriving, to invite friends in turn.
+    internal string LobbyKey { get; private set; }
     internal int LocalSlot { get; private set; }
     // Players gather until the host starts the game.
     internal bool InLobby { get; private set; }
@@ -218,6 +229,11 @@ internal sealed class CoopSession : MonoBehaviour
             error = $"UDP port {GamePort} is already in use.";
             return false;
         }
+        // Without Steam's network the game is still open on the local network, but is not listed online.
+        if (session.transport.ListenOnline())
+            session.listing = SteamLobbies.Host();
+        else
+            Debug.LogWarning("[Multiplayer] Steam's network is unavailable, so the game is open on the LAN only");
         session.IsHost = true;
         session.InLobby = true;
         session.LocalSlot = HostSlot;
@@ -227,6 +243,7 @@ internal sealed class CoopSession : MonoBehaviour
         CharacterRecords.Clear();
         if (saved != null)
             CharacterRecords.LoadCampaign(saved);
+        session.LobbyKey = NewKey();
         session.names[1] = SteamFriends.GetPersonaName();
         session.accounts[1] = PlayerIdentity.SteamId;
         session.ready[1] = true;
@@ -237,13 +254,40 @@ internal sealed class CoopSession : MonoBehaviour
         return true;
     }
 
-    internal static bool Join(IPEndPoint endpoint, out string error)
+    // Joins the host at this address with the password the player gave, or the lobby's key from an invite.
+    internal static bool Join(IPEndPoint endpoint, string password, string key, out string error)
+    {
+        if (!BeginJoin(password, key, out error))
+            return false;
+        Current.host = Current.transport.Connect(endpoint);
+        Current.HostEndpoint = endpoint;
+        Debug.Log($"[Multiplayer] Connecting to {endpoint}");
+        return true;
+    }
+
+    // Joins the game this Steam account hosts, through Steam's network, as Join does at an address.
+    internal static bool Join(ulong account, string password, string key, out string error)
+    {
+        if (!BeginJoin(password, key, out error))
+            return false;
+        Current.host = Current.transport.Connect(account);
+        if (Current.host == HSteamNetConnection.Invalid)
+        {
+            Stop();
+            error = "Steam could not connect to the host.";
+            return false;
+        }
+        Debug.Log($"[Multiplayer] Connecting to {account} through Steam");
+        return true;
+    }
+
+    private static bool BeginJoin(string password, string key, out string error)
     {
         if (!Create(out error))
             return false;
-        Current.host = Current.transport.Connect(endpoint);
+        Current.joinPassword = password ?? string.Empty;
+        Current.LobbyKey = key ?? string.Empty;
         KeeperSpawn.CutRequested += Current.RequestCut;
-        Debug.Log($"[Multiplayer] Connecting to {endpoint}");
         return true;
     }
 
@@ -266,6 +310,7 @@ internal sealed class CoopSession : MonoBehaviour
         KeeperSpawn.CutRequested -= session.RequestCut;
         session.transport.Dispose();
         session.discovery?.Dispose();
+        session.listing?.Dispose();
         EntryBarrier.Cancel();
         EntryStatus.End();
         LobbyChat.Clear();
@@ -459,7 +504,10 @@ internal sealed class CoopSession : MonoBehaviour
             return;
         if (IsHost)
         {
-            discovery.Reply(names[1], peers.Count + 1, Settings.Players, InLobby, GamePort);
+            discovery.Describe(accounts[1], names[1], CampaignLabel, peers.Count + 1, Settings.Players, InLobby, GamePort,
+                (byte)Settings.Visibility, Settings.Visibility != HostSettings.Access.Private, LobbyKey);
+            listing?.Describe(accounts[1], names[1], CampaignLabel, peers.Count + 1, Settings.Players, InLobby, GamePort,
+                (byte)Settings.Visibility);
             SendWorlds();
             ShareEntry();
             TryRelease();
@@ -521,6 +569,8 @@ internal sealed class CoopSession : MonoBehaviour
         writer.Write(SteamFriends.GetPersonaName());
         writer.Write(PlayerIdentity.SteamId);
         writer.Write(PlayerIdentity.Profile);
+        writer.Write(joinPassword);
+        writer.Write(LobbyKey ?? string.Empty);
         Send(connection, true);
     }
 
@@ -569,7 +619,18 @@ internal sealed class CoopSession : MonoBehaviour
         {
             if (message == Message.Hello)
             {
-                Admit(connection, reader.ReadByte(), reader.ReadString(), reader.ReadUInt64(), reader.ReadString());
+                // A game of another version may say something else after the version.
+                if (reader.ReadByte() != Protocol)
+                    Refuse(connection, "The host uses a different version of the mod.", password: false);
+                else
+                {
+                    string name = reader.ReadString();
+                    ulong said = reader.ReadUInt64();
+                    // A player Steam vouches for, as every online one, is that account whatever they say; a LAN player
+                    // without Steam's word is who they say.
+                    ulong vouched = transport.Account(connection);
+                    Admit(connection, name, vouched != 0 ? vouched : said, reader.ReadString(), reader.ReadString(), reader.ReadString());
+                }
                 return;
             }
             // Players speak only for their own keeper.
@@ -733,12 +794,21 @@ internal sealed class CoopSession : MonoBehaviour
                 CampaignLabel = reader.ReadString();
                 Settings = HostSettings.Read(reader);
                 world = ReadWorld(reader);
+                LobbyKey = reader.ReadString();
                 KeeperSpawn.EnableJoined(slot);
                 Debug.Log($"[Multiplayer] Joined as Keeper {slot}" + (InLobby ? " in the lobby" : " while the game runs"));
                 Admitted?.Invoke();
                 return true;
             case Message.Refused:
-                Fail(reader.ReadString());
+                string reason = reader.ReadString();
+                if (reader.ReadBoolean())
+                {
+                    Debug.Log("[Multiplayer] " + reason);
+                    Stop();
+                    PasswordRefused?.Invoke(reason);
+                }
+                else
+                    Fail(reason);
                 return true;
             case Message.Chat:
                 LobbyChat.Add(slot, slot == 0 ? null : names[slot] ?? $"Keeper {slot}", LobbyChat.Clean(reader.ReadString()));
@@ -908,7 +978,7 @@ internal sealed class CoopSession : MonoBehaviour
             chains.ReleaseNow();
     }
 
-    private void Admit(HSteamNetConnection connection, int protocol, string name, ulong account, string profile)
+    private void Admit(HSteamNetConnection connection, string name, ulong account, string profile, string password, string lobbyKey)
     {
         if (peers.ContainsKey(connection))
             return;
@@ -919,14 +989,13 @@ internal sealed class CoopSession : MonoBehaviour
         // Games sharing one Steam account are told apart by their profiles.
         bool sharedAccount = Array.IndexOf(accounts, account, 1) >= 0;
         string key = PlayerIdentity.Key(account, profile, sharedAccount);
-        string refusal = protocol != Protocol ? "The host uses a different version of the mod."
-            : Array.IndexOf(keys, key) >= 0 ? "You are already in this game."
-            : slot < 0 ? "The game is full." : null;
+        bool askPassword = false;
+        string refusal = Array.IndexOf(keys, key) >= 0 ? "You are already in this game." : null;
+        refusal ??= Barred(account, password, lobbyKey, out askPassword);
+        refusal ??= slot < 0 ? "The game is full." : null;
         if (refusal != null)
         {
-            Compose(Message.Refused, 0).Write(refusal);
-            Send(connection, true);
-            transport.Close(connection);
+            Refuse(connection, refusal, askPassword);
             return;
         }
         peers[connection] = slot;
@@ -940,6 +1009,7 @@ internal sealed class CoopSession : MonoBehaviour
         writer.Write(CampaignLabel);
         Settings.Write(writer);
         WriteWorld(writer, campaign);
+        writer.Write(LobbyKey);
         Send(connection, true);
         // The lobby shows who is here; a player joining a running game is announced as they enter it.
         for (int member = 1; member <= MaxPlayers; member++)
@@ -1200,6 +1270,7 @@ internal sealed class CoopSession : MonoBehaviour
             }
             Debug.LogWarning($"[Multiplayer] Could not send the game to Keeper {slot}");
             Compose(Message.Refused, 0).Write("The host's game could not be sent.");
+            writer.Write(false);
             Send(connection, true);
             transport.Close(connection);
             // A connection closed here reports no disconnection.
@@ -1351,6 +1422,46 @@ internal sealed class CoopSession : MonoBehaviour
             if (introduced[peer.Value])
                 Send(peer.Key, reliable);
         }
+    }
+
+    // Who the host's settings let in. An invite's key lets anyone in; otherwise a private game lets no one in, a
+    // friends' game the host's Steam friends and the host's own account, and a password game whoever gives it,
+    // refusing the others with the password asked for again.
+    private string Barred(ulong account, string password, string lobbyKey, out bool askPassword)
+    {
+        askPassword = false;
+        if (lobbyKey.Length > 0 && lobbyKey == LobbyKey)
+            return null;
+        switch (Settings.Visibility)
+        {
+            case HostSettings.Access.Private:
+                return "This game is private. Join it through an invite.";
+            case HostSettings.Access.Friends:
+                return account == accounts[HostSlot] || SteamFriends.HasFriend(new CSteamID(account), EFriendFlags.k_EFriendFlagImmediate)
+                    ? null : "This game is open to the host's friends.";
+            case HostSettings.Access.Password:
+                askPassword = password != Settings.Password;
+                return !askPassword ? null : password.Length == 0 ? "This game asks for a password." : "Wrong password.";
+            default:
+                return null;
+        }
+    }
+
+    private void Refuse(HSteamNetConnection connection, string reason, bool password)
+    {
+        Compose(Message.Refused, 0).Write(reason);
+        writer.Write(password);
+        Send(connection, true);
+        transport.Close(connection);
+    }
+
+    // A lobby's key: letters no one guesses.
+    private static string NewKey()
+    {
+        var bytes = new byte[LanDiscovery.KeyLength / 2];
+        using (var random = System.Security.Cryptography.RandomNumberGenerator.Create())
+            random.GetBytes(bytes);
+        return BitConverter.ToString(bytes).Replace("-", string.Empty).ToLowerInvariant();
     }
 
     private static void Fail(string reason)

@@ -1,3 +1,5 @@
+using System.Collections.Generic;
+using GYK2.TombManyKeepers.UI.MainMenu;
 using HarmonyLib;
 using UnityEngine;
 using UnityEngine.UI;
@@ -8,6 +10,9 @@ namespace GYK2.TombManyKeepers.Patches.UI;
 internal static class MainMenuLayoutPatches
 {
     private static readonly Vector3[] Corners = new Vector3[4];
+    private static readonly AccessTools.FieldRef<UIMainMenuWindow, List<(RectTransform, Vector2)>> IntroRests =
+        AccessTools.FieldRefAccess<UIMainMenuWindow, List<(RectTransform, Vector2)>>("introButtonRests");
+    private static readonly List<(RectTransform, Vector2)> Moving = new List<(RectTransform, Vector2)>();
 
     [HarmonyPostfix]
     private static void FitContent(RectTransform __0)
@@ -16,6 +21,19 @@ internal static class MainMenuLayoutPatches
             return;
 
         var content = (RectTransform)__0.Find("Bg/Vertical Group");
+        var available = ((RectTransform)content.parent).rect;
+        var margin = 16f / ResolutionConfig.GetUiScaleFactor();
+        // The mod's title stands under the logo, both giving way on short screens before the buttons do.
+        ModTitle.Arrange(content, available.height - 2f * margin);
+        // The menu's intro slides the buttons up from below their places; they are measured where they come to rest.
+        Moving.Clear();
+        foreach (var (part, rest) in IntroRests(__0.GetComponent<UIMainMenuWindow>()))
+        {
+            if (part == null)
+                continue;
+            Moving.Add((part, part.anchoredPosition));
+            part.anchoredPosition = rest;
+        }
         var minimum = new Vector2(float.PositiveInfinity, float.PositiveInfinity);
         var maximum = new Vector2(float.NegativeInfinity, float.NegativeInfinity);
         foreach (RectTransform child in content)
@@ -32,8 +50,8 @@ internal static class MainMenuLayoutPatches
             }
         }
 
-        var available = ((RectTransform)content.parent).rect;
-        var margin = 16f / ResolutionConfig.GetUiScaleFactor();
+        foreach (var (part, now) in Moving)
+            part.anchoredPosition = now;
         var size = maximum - minimum;
         var scale = Mathf.Min(1f, (available.width - 2f * margin) / size.x,
             (available.height - 2f * margin) / size.y);
