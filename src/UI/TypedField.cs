@@ -2,7 +2,7 @@ using LazyBearTechnology;
 using TMPro;
 using UnityEngine;
 
-namespace GYK2.TombManyKeepers.UI.Multiplayer;
+namespace GYK2.TombManyKeepers.UI;
 
 // While the player types in one of the mod's text fields, the game's own keys wait, as its own text fields make
 // them, so typing a letter presses nothing; Escape leaves the field.

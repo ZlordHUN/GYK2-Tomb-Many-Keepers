@@ -11,9 +11,10 @@ using UnityEngine;
 namespace GYK2.TombManyKeepers.Network.Discovery;
 
 // UDP broadcast discovery. Browsers probe the local networks, and any host they name, and hosts answer with
-// their game description, which says who the game is open to. A probe carries the moment it left, which the answer
-// returns, so the browser times the round trip; both ends take packets on a thread of their own as they arrive, so
-// no frame's wait counts. A probe may also carry a lobby's key from an invite: an unlisted game answers only that.
+// their game description, which says who the game is open to, which build of the mod it runs and on which version of
+// the game. A probe carries the moment it left, which the answer returns, so the browser times the round trip; both
+// ends take packets on a thread of their own as they arrive, so no frame's wait counts. A probe may also carry a
+// lobby's key from an invite: an unlisted game answers only that.
 internal sealed class LanDiscovery : IDisposable
 {
     internal sealed class Game
@@ -40,6 +41,10 @@ internal sealed class LanDiscovery : IDisposable
         internal bool InLobby;
         // Who the host's settings open the game to, as the host's settings name them.
         internal byte Access;
+        // The build of the mod the host runs and the version of the game it runs on; only a game of the same build,
+        // on the same version, joins.
+        internal string Build;
+        internal string GameVersion;
         // The round trip to the host in milliseconds, or less than zero before one is timed.
         internal float Ping = -1f;
         internal float SeenAt;
@@ -71,7 +76,7 @@ internal sealed class LanDiscovery : IDisposable
     private const float LongestTrip = 5000f;
     private static readonly byte[] Probe = { (byte)'T', (byte)'M', (byte)'K', (byte)'?' };
     // The last byte is the answer's format; games of another format ignore each other's probes and answers.
-    private static readonly byte[] Answer = { (byte)'T', (byte)'M', (byte)'K', 4 };
+    private static readonly byte[] Answer = { (byte)'T', (byte)'M', (byte)'K', 6 };
     private static readonly Stopwatch Clock = Stopwatch.StartNew();
 
     private readonly Socket socket = new Socket(AddressFamily.InterNetwork, SocketType.Dgram, ProtocolType.Udp);
@@ -83,7 +88,7 @@ internal sealed class LanDiscovery : IDisposable
     private volatile byte[] description;
     private volatile bool listed;
     private volatile byte[] key;
-    private (ulong, string, string, int, int, bool, ushort, byte, bool, string) described;
+    private (ulong, string, string, int, int, bool, ushort, byte, string, string, bool, string) described;
     private volatile bool closed;
 
     private LanDiscovery(int port, bool host)
@@ -122,12 +127,12 @@ internal sealed class LanDiscovery : IDisposable
             Send(keyed, new IPEndPoint(address, Port));
     }
 
-    // The game the host's answers describe from now on: who it is open to, whether every probe is answered or
-    // only those carrying the lobby's key.
+    // The game the host's answers describe from now on: who it is open to, the build it runs and on which version of
+    // the game, whether every probe is answered or only those carrying the lobby's key.
     internal void Describe(ulong host, string name, string campaign, int players, int capacity, bool inLobby, ushort gamePort,
-        byte access, bool answersAll, string lobbyKey)
+        byte access, string build, string gameVersion, bool answersAll, string lobbyKey)
     {
-        var game = (host, name, campaign, players, capacity, inLobby, gamePort, access, answersAll, lobbyKey);
+        var game = (host, name, campaign, players, capacity, inLobby, gamePort, access, build, gameVersion, answersAll, lobbyKey);
         if (description != null && game.Equals(described))
             return;
         described = game;
@@ -145,6 +150,8 @@ internal sealed class LanDiscovery : IDisposable
             writer.Write(name);
             writer.Write(campaign);
             writer.Write(access);
+            writer.Write(build ?? string.Empty);
+            writer.Write(gameVersion ?? string.Empty);
         }
         description = stream.ToArray();
     }
@@ -189,6 +196,8 @@ internal sealed class LanDiscovery : IDisposable
         string name = reader.ReadString();
         string campaign = reader.ReadString();
         byte access = reader.ReadByte();
+        string build = reader.ReadString();
+        string gameVersion = reader.ReadString();
         var entry = games.Find(item => item.Id == game);
         if (entry == null)
             games.Add(entry = new Game { Id = game });
@@ -201,6 +210,8 @@ internal sealed class LanDiscovery : IDisposable
         entry.Name = name;
         entry.Campaign = campaign;
         entry.Access = access;
+        entry.Build = build;
+        entry.GameVersion = gameVersion;
         entry.SeenAt = Time.unscaledTime;
         if (arrival.Trip >= 0f)
             entry.Timed(arrival.Trip);

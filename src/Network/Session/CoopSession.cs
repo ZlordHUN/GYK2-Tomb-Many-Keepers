@@ -3,7 +3,7 @@ using System.Collections.Generic;
 using System.IO;
 using System.Net;
 using System.Net.Sockets;
-using GYK2.TombManyKeepers.Features.MultiplayerKeepers;
+using GYK2.TombManyKeepers.Features.ManualSaves;
 using GYK2.TombManyKeepers.Multiplayer.Players;
 using GYK2.TombManyKeepers.Multiplayer.Presentation;
 using GYK2.TombManyKeepers.Multiplayer.Progression;
@@ -17,8 +17,8 @@ using UnityEngine;
 
 namespace GYK2.TombManyKeepers.Network.Session;
 
-// The host gathers players in a lobby, admits them into keeper slots 2-4 by their identity and
-// starts or continues its campaign once everyone is ready, releasing the party together once all
+// The host gathers players in a lobby, admits those on its own build of the mod and version of the
+// game into keeper slots 2-4 by their identity and starts or continues its campaign once everyone is ready, releasing the party together once all
 // of them have loaded. Everyone's loading screen opens at the start and follows the host's loading,
 // the transfer of its game and everyone's own loading. A later player enters the lobby, readies up
 // and joins the running game.
@@ -31,7 +31,10 @@ internal sealed class CoopSession : MonoBehaviour
     // The host is always the lobby's first keeper.
     internal const int HostSlot = 1;
     internal const ushort GamePort = 34272;
-    internal const byte Protocol = 9;
+    internal const byte Protocol = 12;
+    // Every game since this protocol tells its build right after its protocol, whatever it says after them; an older
+    // game said its player's name there.
+    private const byte BuildsTold = 11;
     private const float StateInterval = 0.05f;
     // Reliable messages are limited to 512 KiB, so the game travels in parts.
     private const int WorldPartSize = 256 * 1024;
@@ -44,6 +47,8 @@ internal sealed class CoopSession : MonoBehaviour
     private const float ReceiveReportInterval = 0.25f;
     // A joined player gives up on a host that stops sending anything towards its entry.
     private const float EntryTimeout = 60f;
+    // A joined player's saves come at most this often.
+    private const float RequestedSaveInterval = 5f;
 
     private enum Message : byte
     {
@@ -80,7 +85,11 @@ internal sealed class CoopSession : MonoBehaviour
         LoadStatus,
         LoadReport,
         Cue,
-        Chat
+        Chat,
+        // A joined player asks the host to save; the host says whether it did, and shows everyone its saving.
+        SaveRequest,
+        Saved,
+        Saving
     }
 
     private readonly Dictionary<HSteamNetConnection, int> peers = new Dictionary<HSteamNetConnection, int>();
@@ -139,6 +148,7 @@ internal sealed class CoopSession : MonoBehaviour
     // What a joining player gives when the host asks for a password.
     private string joinPassword = string.Empty;
     private float nextReceiveReport;
+    private float nextRequestedSave;
 
     internal static CoopSession Current { get; private set; }
     internal static event Action Admitted;
@@ -250,6 +260,8 @@ internal sealed class CoopSession : MonoBehaviour
         session.introduced[1] = true;
         KeeperSpawn.KeeperAdded += session.ShareRescue;
         KeeperSpawn.BaysOpened += session.ShareBays;
+        SaveSystem.OnSaveWriteStarted += session.ShareSaveStarted;
+        SaveSystem.OnSaveWriteEnded += session.ShareSaveEnded;
         Debug.Log($"[Multiplayer] Hosting a lobby for {session.CampaignLabel} on UDP port {GamePort}");
         return true;
     }
@@ -307,6 +319,8 @@ internal sealed class CoopSession : MonoBehaviour
         MainGame.OnGameStarted -= session.HostStarted;
         KeeperSpawn.KeeperAdded -= session.ShareRescue;
         KeeperSpawn.BaysOpened -= session.ShareBays;
+        SaveSystem.OnSaveWriteStarted -= session.ShareSaveStarted;
+        SaveSystem.OnSaveWriteEnded -= session.ShareSaveEnded;
         KeeperSpawn.CutRequested -= session.RequestCut;
         session.transport.Dispose();
         session.discovery?.Dispose();
@@ -315,6 +329,7 @@ internal sealed class CoopSession : MonoBehaviour
         EntryStatus.End();
         LobbyChat.Clear();
         SharedPresentation.Clear();
+        SaveIndicator.Clear();
         RemoteKeeper.Clear();
         WorldSync.Clear();
         ObjectMotion.Clear();
@@ -443,6 +458,48 @@ internal sealed class CoopSession : MonoBehaviour
         session.Broadcast(true);
     }
 
+    // A joined player asks the host to save the campaign, whose save holds every keeper.
+    internal static void RequestSave()
+    {
+        var session = Current;
+        if (session == null || session.IsHost || session.LocalSlot == 0)
+            return;
+        session.SendToHost(Message.SaveRequest, _ => { });
+        Notify("Asked the host to save the game.");
+    }
+
+    // The host saves the campaign into the save it plays from, as sleep does, and everyone hears who saved it; a host
+    // that cannot save now, as while loading, or has just saved for someone, tells only the player who asked.
+    private void SaveFor(HSteamNetConnection connection, int slot)
+    {
+        bool saved = false;
+        if (Time.unscaledTime >= nextRequestedSave)
+            ManualSave.SaveCurrent(done => saved = done);
+        if (saved)
+            nextRequestedSave = Time.unscaledTime + RequestedSaveInterval;
+        Compose(Message.Saved, slot).Write(saved);
+        if (!saved)
+        {
+            Send(connection, true);
+            return;
+        }
+        Broadcast(true);
+        Notify($"{names[slot] ?? $"Keeper {slot}"} saved the game.");
+    }
+
+    // Everyone sees the host's saving as the host does, whatever saved: sleep, the pause menu or a player's request.
+    private void ShareSaveStarted() => ShareSaving(true);
+
+    private void ShareSaveEnded() => ShareSaving(false);
+
+    private void ShareSaving(bool saving)
+    {
+        if (Current != this || peers.Count == 0)
+            return;
+        Compose(Message.Saving, HostSlot).Write(saving);
+        Broadcast(true);
+    }
+
     // A joined player's story transition waits for the host's approval.
     internal static void RequestQuest(QuestSync.Transition transition, string id, float argument) =>
         Current?.SendToHost(Message.QuestRequest, writer => QuestSync.WriteRequest(writer, transition, id, argument));
@@ -505,9 +562,9 @@ internal sealed class CoopSession : MonoBehaviour
         if (IsHost)
         {
             discovery.Describe(accounts[1], names[1], CampaignLabel, peers.Count + 1, Settings.Players, InLobby, GamePort,
-                (byte)Settings.Visibility, Settings.Visibility != HostSettings.Access.Private, LobbyKey);
+                (byte)Settings.Visibility, ModBuild.Id, GameVersion.Local, Settings.Visibility != HostSettings.Access.Private, LobbyKey);
             listing?.Describe(accounts[1], names[1], CampaignLabel, peers.Count + 1, Settings.Players, InLobby, GamePort,
-                (byte)Settings.Visibility);
+                (byte)Settings.Visibility, ModBuild.Id, GameVersion.Local);
             SendWorlds();
             ShareEntry();
             TryRelease();
@@ -517,6 +574,7 @@ internal sealed class CoopSession : MonoBehaviour
         }
         else
         {
+            SaveIndicator.Update();
             if (!WatchEntry())
                 return;
             LoadArrivedGame();
@@ -566,6 +624,8 @@ internal sealed class CoopSession : MonoBehaviour
         if (IsHost)
             return;
         Compose(Message.Hello, 0).Write(Protocol);
+        writer.Write(ModBuild.Id);
+        writer.Write(GameVersion.Local);
         writer.Write(SteamFriends.GetPersonaName());
         writer.Write(PlayerIdentity.SteamId);
         writer.Write(PlayerIdentity.Profile);
@@ -619,18 +679,27 @@ internal sealed class CoopSession : MonoBehaviour
         {
             if (message == Message.Hello)
             {
-                // A game of another version may say something else after the version.
-                if (reader.ReadByte() != Protocol)
-                    Refuse(connection, "The host uses a different version of the mod.", password: false);
-                else
+                // Only a game of this build and this version of the game joins, as GYK1 checked them in turn; one of
+                // another protocol is of another build, and may say something else after its build.
+                byte protocol = reader.ReadByte();
+                string build = protocol >= BuildsTold ? reader.ReadString() : null;
+                if (protocol != Protocol || !ModBuild.Matches(build))
                 {
-                    string name = reader.ReadString();
-                    ulong said = reader.ReadUInt64();
-                    // A player Steam vouches for, as every online one, is that account whatever they say; a LAN player
-                    // without Steam's word is who they say.
-                    ulong vouched = transport.Account(connection);
-                    Admit(connection, name, vouched != 0 ? vouched : said, reader.ReadString(), reader.ReadString(), reader.ReadString());
+                    Refuse(connection, ModBuild.Mismatch(build, ModBuild.Id), password: false);
+                    return;
                 }
+                string version = reader.ReadString();
+                if (!GameVersion.Matches(version))
+                {
+                    Refuse(connection, GameVersion.Mismatch(version, GameVersion.Local), password: false);
+                    return;
+                }
+                string name = reader.ReadString();
+                ulong said = reader.ReadUInt64();
+                // A player Steam vouches for, as every online one, is that account whatever they say; a LAN player
+                // without Steam's word is who they say.
+                ulong vouched = transport.Account(connection);
+                Admit(connection, name, vouched != 0 ? vouched : said, reader.ReadString(), reader.ReadString(), reader.ReadString());
                 return;
             }
             // Players speak only for their own keeper.
@@ -730,6 +799,10 @@ internal sealed class CoopSession : MonoBehaviour
                 if (playing[slot])
                     Rested(slot, reader.ReadBoolean());
                 return false;
+            case Message.SaveRequest:
+                if (playing[slot])
+                    SaveFor(connection, slot);
+                return false;
             case Message.QuestRequest:
                 if (!playing[slot] || !KeeperSpawn.Active)
                     return false;
@@ -798,6 +871,15 @@ internal sealed class CoopSession : MonoBehaviour
                 KeeperSpawn.EnableJoined(slot);
                 Debug.Log($"[Multiplayer] Joined as Keeper {slot}" + (InLobby ? " in the lobby" : " while the game runs"));
                 Admitted?.Invoke();
+                return true;
+            case Message.Saving:
+                SaveIndicator.Show(reader.ReadBoolean());
+                return true;
+            case Message.Saved:
+                if (reader.ReadBoolean())
+                    Notify(slot == LocalSlot ? "The host saved the game." : $"{names[slot] ?? $"Keeper {slot}"} saved the game.");
+                else if (slot == LocalSlot)
+                    Notify("The host could not save the game right now.");
                 return true;
             case Message.Refused:
                 string reason = reader.ReadString();

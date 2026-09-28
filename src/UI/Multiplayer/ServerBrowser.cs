@@ -21,8 +21,10 @@ namespace GYK2.TombManyKeepers.UI.Multiplayer;
 // the local network answers with; the Favorites tab the player's favourite hosts from both, added and removed with the
 // game's own context menu on a right click. A game is listed as its host's settings open it: to everyone, to the
 // host's Steam friends, never for a private game, and with a lock for a password game, which asks for its password
-// before joining and again after a wrong one. An invite the player accepted opens the browser, which also asks the
-// host's addresses from the invite, with its lobby's key, and joins its game past any password once it answers.
+// before joining and again after a wrong one. A game of another build of the mod, or on another version of the game,
+// is marked so and not joined: the note names both, as the host's refusal would. An invite the player accepted opens
+// the browser, which also asks the host's addresses from the invite, with its lobby's key, and joins its game past
+// any password once it answers.
 // Friends' games and joining by code come later, as their tab and button say. The frame and the buttons stay clear of
 // the game's credits in the corner below.
 internal sealed class ServerBrowser : LazyWindow<LazyWidgetDataBase>
@@ -246,7 +248,8 @@ internal sealed class ServerBrowser : LazyWindow<LazyWidgetDataBase>
             string key = invite.Key;
             invite = null;
             CloseDialog();
-            Connect(game, password: null, key);
+            if (Joinable(game))
+                Connect(game, password: null, key);
             return;
         }
         if (Time.unscaledTime - invitedAt <= InviteWait)
@@ -385,12 +388,24 @@ internal sealed class ServerBrowser : LazyWindow<LazyWidgetDataBase>
     // A password game asks for its password first.
     private void Join(LanDiscovery.Game game)
     {
-        if (game == null || CoopSession.Current != null)
+        if (game == null || CoopSession.Current != null || !Joinable(game))
             return;
         if (game.Access == (byte)HostSettings.Access.Password)
             PasswordWindow.Open(game.Name, null, password => Connect(game, password, key: null));
         else
             Connect(game, password: null, key: null);
+    }
+
+    // Only a game of this build of the mod, on this version of the game, is joined; the note names what differs, the
+    // build before the version, as the host checks them.
+    private static bool Joinable(LanDiscovery.Game game)
+    {
+        string refusal = !ModBuild.Matches(game.Build) ? ModBuild.Mismatch(ModBuild.Id, game.Build) :
+            !GameVersion.Matches(game.GameVersion) ? GameVersion.Mismatch(GameVersion.Local, game.GameVersion) : null;
+        if (refusal == null)
+            return true;
+        Tell(refusal);
+        return false;
     }
 
     // A game found on the network is joined at its address, an online one through Steam's network.

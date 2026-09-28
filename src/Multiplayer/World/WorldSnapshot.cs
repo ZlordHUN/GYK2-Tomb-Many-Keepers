@@ -2,7 +2,6 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.IO.Compression;
-using GYK2.TombManyKeepers.Features.MultiplayerKeepers;
 using GYK2.TombManyKeepers.Multiplayer.Players;
 using GYK2.TombManyKeepers.Multiplayer.Presentation;
 using GYK2.TombManyKeepers.Multiplayer.Progression;

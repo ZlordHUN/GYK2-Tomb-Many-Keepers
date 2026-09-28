@@ -34,6 +34,13 @@ internal static class ResolutionSettingsPatches
         (5760, 1080), (7680, 1440)
     };
 
+    // The game's own "(x3)" presets give 2560x1440 and 1920x1440 a closer gameplay view: the world renders at 1080
+    // lines and is scaled up to the screen's 1440. These 1440-line ultrawide sizes get the same view beside their
+    // native presets.
+    private static readonly int[] ZoomedUltrawideWidths = { 3440, 5120 };
+    private const int ZoomedHeight = 1440, ZoomedRenderHeight = 1080;
+    private const string ZoomSuffix = "(x3)";
+
     private static readonly AccessTools.FieldRef<List<ResolutionConfig>> AvailableResolutions =
         AccessTools.StaticFieldRefAccess<List<ResolutionConfig>>(AccessTools.Field(typeof(ResolutionConfig), "availableResolutions"));
 
@@ -51,11 +58,10 @@ internal static class ResolutionSettingsPatches
 
         // Native presets are useful even when the display driver does not advertise their sizes.
         foreach (var preset in ___hardcodedResolutions)
-        {
-            var name = preset.GetResolutionName();
-            if (!___availableResolutions.Exists(r => r.WindowSizeType == preset.WindowSizeType && r.GetResolutionName() == name))
-                ResolutionConfig.TryAddAvailableResolution(preset);
-        }
+            AddPreset(preset, ___availableResolutions);
+        foreach (var width in ZoomedUltrawideWidths)
+            AddPreset(new ResolutionConfig(width, ZoomedHeight, 2, UIWindowSizeType.Big, ZoomSuffix, useMainMenuScaleX2: true,
+                isFakeResolution: true, width * ZoomedRenderHeight / ZoomedHeight, ZoomedRenderHeight), ___availableResolutions);
 
         foreach (var (width, height) in AdditionalResolutions)
             AddResolution(width, height, ___availableResolutions);
@@ -66,6 +72,13 @@ internal static class ResolutionSettingsPatches
         var desktop = Screen.currentResolution;
         AddResolution(desktop.width, desktop.height, ___availableResolutions);
         AddResolution(Screen.width, Screen.height, ___availableResolutions);
+        // A display's own size, which drivers do not always list: the main display's, and that of the display the
+        // window is on.
+        var main = UnityEngine.Display.main;
+        if (main != null)
+            AddResolution(main.systemWidth, main.systemHeight, ___availableResolutions);
+        var display = Screen.mainWindowDisplayInfo;
+        AddResolution(display.width, display.height, ___availableResolutions);
         SortResolutions(___availableResolutions);
     }
 
@@ -86,6 +99,13 @@ internal static class ResolutionSettingsPatches
         var ordered = available.OrderBy(r => r.ListedWidth).ThenBy(r => r.ListedHeight).ToArray();
         available.Clear();
         available.AddRange(ordered);
+    }
+
+    private static void AddPreset(ResolutionConfig preset, List<ResolutionConfig> available)
+    {
+        var name = preset.GetResolutionName();
+        if (!available.Exists(r => r.WindowSizeType == preset.WindowSizeType && r.GetResolutionName() == name))
+            ResolutionConfig.TryAddAvailableResolution(preset);
     }
 
     private static void AddResolution(int width, int height, List<ResolutionConfig> available)

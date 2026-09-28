@@ -3,7 +3,7 @@ using HarmonyLib;
 using LazyBearTechnology;
 using UnityEngine;
 
-namespace GYK2.TombManyKeepers.Features.MultiplayerKeepers;
+namespace GYK2.TombManyKeepers.Multiplayer.Players;
 
 internal sealed class KeeperRescueTarget : MonoBehaviour
 {

@@ -1,7 +1,6 @@
 using HarmonyLib;
 using GYK2.TombManyKeepers.UI.MainMenu;
 using GYK2.TombManyKeepers.UI.Mods;
-using GYK2.TombManyKeepers.UI.Multiplayer;
 using LazyBearTechnology;
 using TMPro;
 using UnityEngine;
@@ -10,31 +9,15 @@ using UnityEngine.UI;
 
 namespace GYK2.TombManyKeepers.Patches.UI;
 
+// The main menu's Mods button after Settings, and the mod's title under the game's logo. Features add their own
+// buttons with the same copies of the menu's buttons.
 [HarmonyPatch(typeof(UIMainMenuWindow))]
 internal static class MainMenuPatches
 {
     [HarmonyPostfix]
     [HarmonyPatch(nameof(UIMainMenuWindow.Init))]
-    private static void AddButtons(UIMainMenuWindow __instance, ref LazyButton ___consolesGameButton,
-        LazyButton ___gameSettingsButton)
+    private static void AddButtons(UIMainMenuWindow __instance, LazyButton ___gameSettingsButton)
     {
-        var button = ___consolesGameButton;
-        if (button != null && !SaveSystem.IsLimitedSaveSlotsEnabled)
-        {
-            // The scene's console save-slot button is hidden in this PC build.
-            SetLabel(button, "Multiplayer");
-            button.onClick.RemoveListener(__instance.OnConsolesGameButtonClicked);
-            button.onClick.AddListener(() => MultiplayerMenu.Show(__instance, true));
-            button.gameObject.SetActive(true);
-            var host = AddButton(___gameSettingsButton, button, "Host Game", () => MultiplayerMenu.Host(__instance));
-            var join = AddButton(___gameSettingsButton, host, "Join Game", () => MultiplayerMenu.Join(__instance));
-            MultiplayerMenu.Init(__instance, host, join,
-                AddButton(___gameSettingsButton, join, "Back", () => MultiplayerMenu.Show(__instance, false)));
-
-            // Open() must no longer treat this button as the console save-slot entry.
-            ___consolesGameButton = null;
-        }
-
         if (___gameSettingsButton.transform.parent.Find("Mods") == null)
             AddButton(___gameSettingsButton, ___gameSettingsButton, "Mods", () => ModsWindow.Open(__instance));
         ModTitle.Add(__instance);
@@ -42,16 +25,16 @@ internal static class MainMenuPatches
 
     [HarmonyPostfix]
     [HarmonyPatch(nameof(UIMainMenuWindow.Open))]
-    private static void RefreshButtons(UIMainMenuWindow __instance, LazyButton ___gameSettingsButton)
+    private static void RefreshButtons(LazyButton ___gameSettingsButton)
     {
         // Child text-style components apply their own style during activation.
         var mods = ___gameSettingsButton.transform.parent.Find("Mods");
         if (mods != null)
             mods.GetComponent<LazyButton>().SetKeepPressed(false);
-        MultiplayerMenu.Refresh(__instance);
     }
 
-    private static LazyButton AddButton(LazyButton template, LazyButton after, string label, UnityAction onClick)
+    // A copy of the menu's template button after another, under its own label and with its own click.
+    internal static LazyButton AddButton(LazyButton template, LazyButton after, string label, UnityAction onClick)
     {
         var button = Object.Instantiate(template, template.transform.parent);
         button.transform.SetSiblingIndex(after.transform.GetSiblingIndex() + 1);
@@ -64,7 +47,7 @@ internal static class MainMenuPatches
         return button;
     }
 
-    private static void SetLabel(LazyButton button, string text)
+    internal static void SetLabel(LazyButton button, string text)
     {
         var label = button.GetComponentInChildren<LocalizedLabel>(true);
         label.IgnoreLocalize = true;

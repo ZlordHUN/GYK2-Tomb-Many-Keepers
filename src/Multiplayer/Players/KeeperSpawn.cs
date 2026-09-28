@@ -2,7 +2,7 @@ using HarmonyLib;
 using LazyBearTechnology;
 using UnityEngine;
 
-namespace GYK2.TombManyKeepers.Features.MultiplayerKeepers;
+namespace GYK2.TombManyKeepers.Multiplayer.Players;
 
 [HarmonyPatch]
 internal static class KeeperSpawn

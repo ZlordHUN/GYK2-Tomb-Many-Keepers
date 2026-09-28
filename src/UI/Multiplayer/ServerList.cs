@@ -11,15 +11,17 @@ namespace GYK2.TombManyKeepers.UI.Multiplayer;
 // The games a browser lists, each on a copy of the save list's own card: the host's name, with the game's gold
 // star when it is a favourite and its lock when joining asks for a password, whether its game waits in the lobby or
 // runs and which campaign it plays, how many keepers it has and its ping, and, where a tab mixes them, where it was
-// found. Favourites that do not answer
-// follow, dimmed. A click picks a game, lit in gold as the host's campaign pick is; picking it again joins, as a
-// double click does. Without games the list says why in its middle.
+// found. A game of another build of the mod, or on another version of the game, says so after its campaign, in
+// GYK1's warning colour for a game that cannot be joined. Favourites that do not answer follow, dimmed. A click picks a game, lit in gold as the host's
+// campaign pick is; picking it again joins, as a double click does. Without games the list says why in its middle.
 internal sealed class ServerList
 {
     private static readonly Color PickColor = new Color(1f, 0.82f, 0.35f);
     // A ping reads as quick, usable or slow at a glance, as in GYK1's browser, and dim before it is timed.
     private static readonly Color Quick = new Color(0.55f, 0.8f, 0.4f), Slow = new Color(0.9f, 0.42f, 0.3f);
     private static readonly Color Dim = new Color(0.588f, 0.553f, 0.533f);
+    private static readonly Color Incompatible = new Color(0.95f, 0.5f, 0.35f);
+    private const string OtherBuild = "  -  incompatible: mod build", OtherVersion = "  -  incompatible: game version";
     private const float QuickPing = 50f, UsablePing = 100f;
     // How far a card's two lines move down to stand in its middle once its third, the standings, is gone. The
     // card's right end keeps a margin from its border and holds the keepers, the ping just after them and, where
@@ -46,6 +48,8 @@ internal sealed class ServerList
         internal FavoriteHosts.Host Favorite;
         internal TMP_Text Name;
         internal TMP_Text Status;
+        // The status line's own colour, for a game that can be joined.
+        internal Color StatusColor;
         internal TMP_Text Keepers;
         internal TMP_Text Ping;
         internal TMP_Text Source;
@@ -91,7 +95,11 @@ internal sealed class ServerList
             if (source != null)
                 row.Source.text = source(game);
             Name(row, game.Name, FavoriteHosts.Contains(game.Host), game.Access == (byte)Network.Session.HostSettings.Access.Password);
-            row.Status.text = $"{(game.InLobby ? "In lobby" : "In game")}  -  {game.Campaign}";
+            // The mod's build is named before the game's version, as the host checks them.
+            string incompatible = !Network.Session.ModBuild.Matches(game.Build) ? OtherBuild :
+                !Network.Session.GameVersion.Matches(game.GameVersion) ? OtherVersion : null;
+            row.Status.text = $"{(game.InLobby ? "In lobby" : "In game")}  -  {game.Campaign}{incompatible}";
+            row.Status.color = incompatible != null ? Incompatible : row.StatusColor;
             row.Keepers.text = $"{game.Players}/{game.Capacity}";
             row.Ping.text = game.Ping < 0f ? "..." : $"{Math.Max(1, Mathf.RoundToInt(game.Ping))} ms";
             row.Ping.color = game.Ping < 0f ? Dim : game.Ping <= QuickPing ? Quick : game.Ping <= UsablePing ? PickColor : Slow;
@@ -106,6 +114,7 @@ internal sealed class ServerList
             row.Source.text = string.Empty;
             Name(row, favorite.Name, favorite: true, locked: false);
             row.Status.text = missingStatus;
+            row.Status.color = row.StatusColor;
             row.Keepers.text = "-/-";
             row.Ping.text = "---";
             row.Ping.color = Dim;
@@ -233,6 +242,7 @@ internal sealed class ServerList
             Status = root.transform.Find("Days").GetComponent<TMP_Text>(),
             Hover = root.transform.Find("Selection").gameObject
         };
+        row.StatusColor = row.Status.color;
         foreach (var line in new[] { row.Name.rectTransform, row.Status.rectTransform })
         {
             line.offsetMin -= new Vector2(0f, LinesDown);

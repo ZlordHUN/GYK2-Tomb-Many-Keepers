@@ -1,15 +1,19 @@
 using System;
+using System.Collections.Generic;
+using DG.Tweening;
 using HarmonyLib;
 using LazyBearTechnology;
 using TMPro;
 using UnityEngine;
 using UnityEngine.UI;
 
-namespace GYK2.TombManyKeepers.UI.Multiplayer;
+namespace GYK2.TombManyKeepers.UI;
 
 // Windows of this mod made from the game's own: a copy of one of its windows keeps the canvas, sounds and
 // gamepad navigation, and the mod fills it with copies of the game's header plates, option rows, cells,
-// text fields and buttons. The game opens, stacks, closes and navigates them like its own.
+// text fields and buttons. The game opens, stacks, closes and navigates them like its own. The game makes its
+// windows again from their small or big layout as the screen's size crosses between the two, and the mod's go
+// with the windows they were made from, to be made again from the new ones as they next open.
 internal static class NativeWindow
 {
     // A header plate's height, and the room its two ornaments take at its ends.
@@ -23,6 +27,11 @@ internal static class NativeWindow
         AccessTools.FieldRefAccess<LazyWindow<LazyWidgetDataBase>, string>("openSoundId");
     private static readonly AccessTools.FieldRef<LazyWindow<LazyWidgetDataBase>, string> CloseSound =
         AccessTools.FieldRefAccess<LazyWindow<LazyWidgetDataBase>, string>("closeSoundId");
+    private static readonly AccessTools.FieldRef<UISlider, TextMeshProUGUI> SliderAmount =
+        AccessTools.FieldRefAccess<UISlider, TextMeshProUGUI>("amountLabel");
+    // The mod's windows made so far, which go when the game's windows change their layout.
+    private static readonly List<GameObject> Copies = new List<GameObject>();
+    private static bool listening;
 
     // The native window, copied without its own behaviour as a window of type T under the given header.
     internal static T Copy<T>(LazyWindow<LazyWidgetDataBase> native, string header) where T : LazyWindow<LazyWidgetDataBase>
@@ -67,7 +76,38 @@ internal static class NativeWindow
         var window = copy.AddComponent<T>();
         OpenSound(window) = OpenSound(native);
         CloseSound(window) = CloseSound(native);
+        Remember(copy);
         return window;
+    }
+
+    private static void Remember(GameObject copy)
+    {
+        if (!listening)
+        {
+            GUIElements.OnWindowSizeTypeChanged += Forget;
+            listening = true;
+        }
+        Copies.RemoveAll(item => item == null);
+        Copies.Add(copy);
+    }
+
+    // The game destroyed the windows the mod's were made from, and parts the mod's still make copies of, such as a
+    // save card or an option row. Each of the mod's windows is made again as it next opens; the animations still
+    // running on a window's parts, such as its list scrolling to a gamepad's focus, stop with it.
+    private static void Forget(UIWindowSizeType size)
+    {
+        int forgotten = 0;
+        foreach (var copy in Copies)
+        {
+            if (copy == null)
+                continue;
+            foreach (var part in copy.GetComponentsInChildren<Component>(true))
+                DOTween.Kill(part);
+            UnityEngine.Object.Destroy(copy);
+            forgotten++;
+        }
+        Copies.Clear();
+        Debug.Log($"[UI] The game's windows took their {size} layout; {forgotten} of the mod's windows are made again as they open");
     }
 
     internal static Transform Content(Component window) => window.transform.Find("GenericWIndowLayout/Content");
@@ -202,6 +242,37 @@ internal static class NativeWindow
         row.gameObject.SetActive(true);
         SetText(Find<TMP_Text>(row.transform, "LeftName"), name);
         row.Initialize(changed, values, index);
+        return row;
+    }
+
+    // A native option row whose value is slid, as the settings window's volumes are: its name, the game's own slider
+    // between its minus and plus, with their sounds and gamepad keys, and the value after them. The slider moves by
+    // whole steps from its start, and the caller names the value each step stands for.
+    internal static UISlider Slider(UISlider template, Transform parent, string name, int steps, int position,
+        Func<int, string> shown, Action<int> changed)
+    {
+        var row = UnityEngine.Object.Instantiate(template, parent);
+        row.name = name;
+        row.gameObject.SetActive(true);
+        SetText(Find<TMP_Text>(row.transform, "LeftName"), name);
+        var value = Find<TextMeshProUGUI>(row.transform, "Value");
+        // The game's slider writes its own count of steps, out of sight; the row shows what they stand for.
+        var count = UnityEngine.Object.Instantiate(value, row.transform);
+        count.name = "Steps";
+        count.gameObject.SetActive(false);
+        SliderAmount(row) = count;
+        var slider = Find<Slider>(row.transform, "Slider");
+        slider.minValue = 0f;
+        slider.maxValue = steps;
+        slider.wholeNumbers = true;
+        slider.SetValueWithoutNotify(position);
+        value.text = shown(position);
+        slider.onValueChanged.AddListener(step =>
+        {
+            int at = Mathf.RoundToInt(step);
+            value.text = shown(at);
+            changed(at);
+        });
         return row;
     }
 

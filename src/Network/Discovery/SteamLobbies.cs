@@ -8,18 +8,18 @@ using UnityEngine;
 
 namespace GYK2.TombManyKeepers.Network.Discovery;
 
-// Online games, listed as Steam lobbies. A host's lobby only describes its game, as its LAN answers do: nobody else
-// joins the lobby, so it ends with the host's game, and players reach the host through Steam's network by the host's
-// account. A public or password game's lobby is public and every search finds it; a friends' game's is for the host's
-// Steam friends; a private game has none. The description never holds the password or the lobby's key. A search asks
-// for lobbies of this session protocol worldwide, and each game's ping is estimated from where its host said it
-// stands on Steam's relay network.
+// Online games, listed as Steam lobbies. A host's lobby only describes its game, with the build of the mod it runs
+// and the version of the game, as its LAN answers do: nobody else joins the lobby, so it ends with the host's game,
+// and players reach the host through Steam's network by the host's account. A public or password game's lobby is
+// public and every search finds it; a friends' game's is for the host's Steam friends; a private game has none. The
+// description never holds the password or the lobby's key. A search asks for lobbies of this session protocol
+// worldwide, and each game's ping is estimated from where its host said it stands on Steam's relay network.
 internal sealed class SteamLobbies : IDisposable
 {
     // The lobby's data; the protocol's key also marks a lobby as this mod's.
     private const string ProtocolKey = "tmk_protocol", HostKey = "host", NameKey = "name", CampaignKey = "campaign",
         PlayersKey = "players", CapacityKey = "capacity", InLobbyKey = "in_lobby", AccessKey = "access", PortKey = "port",
-        PingKey = "ping";
+        PingKey = "ping", BuildKey = "tmk_build", GameVersionKey = "game_version";
     // A lobby Steam did not make is asked for again after this long, and a search Steam never answers is given up.
     private const float Retry = 30f, SearchTimeout = 20f;
     // How often the host looks at where it stands on the relay network, which moves rarely, and how soon again
@@ -36,7 +36,8 @@ internal sealed class SteamLobbies : IDisposable
     private bool creating;
     private float retryAt;
     private float nextPlace;
-    private (ulong host, string name, string campaign, int players, int capacity, bool inLobby, ushort port, byte access) described;
+    private (ulong host, string name, string campaign, int players, int capacity, bool inLobby, ushort port, byte access, string build,
+        string gameVersion) described;
     private bool stale = true;
     // Browser: the games the latest search found, each kept by its lobby so a game stays the same as searches
     // repeat, and where each host stands, for its ping.
@@ -62,9 +63,10 @@ internal sealed class SteamLobbies : IDisposable
     internal bool Searching => searchedAt >= 0f && Time.unscaledTime - searchedAt < SearchTimeout;
 
     // The game the host's lobby describes from now on. A private game has no lobby; the others make one as needed.
-    internal void Describe(ulong host, string name, string campaign, int players, int capacity, bool inLobby, ushort gamePort, byte access)
+    internal void Describe(ulong host, string name, string campaign, int players, int capacity, bool inLobby, ushort gamePort, byte access,
+        string build, string gameVersion)
     {
-        var game = (host, name, campaign, players, capacity, inLobby, gamePort, access);
+        var game = (host, name, campaign, players, capacity, inLobby, gamePort, access, build, gameVersion);
         if (!game.Equals(described))
         {
             described = game;
@@ -100,7 +102,8 @@ internal sealed class SteamLobbies : IDisposable
                          Publish(CampaignKey, campaign ?? string.Empty) & Publish(PlayersKey, players.ToString(CultureInfo.InvariantCulture)) &
                          Publish(CapacityKey, capacity.ToString(CultureInfo.InvariantCulture)) & Publish(InLobbyKey, inLobby ? "1" : "0") &
                          Publish(AccessKey, access.ToString(CultureInfo.InvariantCulture)) &
-                         Publish(PortKey, gamePort.ToString(CultureInfo.InvariantCulture));
+                         Publish(PortKey, gamePort.ToString(CultureInfo.InvariantCulture)) & Publish(BuildKey, build ?? string.Empty) &
+                         Publish(GameVersionKey, gameVersion ?? string.Empty);
             // Searches match the protocol's key, so a new lobby is found only once the rest describes its game.
             stale = !(taken && Publish(ProtocolKey, Protocol) && type == wanted);
         }
@@ -252,6 +255,8 @@ internal sealed class SteamLobbies : IDisposable
         game.Capacity = capacity;
         game.InLobby = Data(InLobbyKey) == "1";
         game.Access = access;
+        game.Build = Data(BuildKey);
+        game.GameVersion = Data(GameVersionKey);
         game.SeenAt = Time.unscaledTime;
         // Steam's network does not join an account to itself, so a game the player's own account hosts, as another
         // copy of the game on this machine does, is reached at its port here.
