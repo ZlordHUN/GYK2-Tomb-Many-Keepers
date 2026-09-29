@@ -23,6 +23,10 @@ internal static class PlayerIdentity
         {
             if (profile != null)
                 return profile;
+            // Two games on one Windows account share that folder, so a local test names its own.
+            profile = FromCommandLine();
+            if (profile != null)
+                return profile;
             string path = Path.Combine(Application.persistentDataPath, ProfileFile);
             try
             {
@@ -41,6 +45,16 @@ internal static class PlayerIdentity
             }
             return profile;
         }
+    }
+
+    // -tmk-profile NAME
+    private static string FromCommandLine()
+    {
+        string[] args = Environment.GetCommandLineArgs();
+        int index = Array.IndexOf(args, "-tmk-profile");
+        return index >= 0 && index + 1 < args.Length && !string.IsNullOrWhiteSpace(args[index + 1])
+            ? args[index + 1].Trim()
+            : null;
     }
 
     // A player's key in a campaign; the profile only matters when another player shares the account.
