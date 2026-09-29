@@ -23,6 +23,8 @@ internal static class SharedAnswers
         AccessTools.FieldRefAccess<UIMultiAnswer, CanvasGroup>("canvas");
     private static readonly AccessTools.FieldRef<UIMultiAnswer, bool> Interactable =
         AccessTools.FieldRefAccess<UIMultiAnswer, bool>("interactable");
+    private static readonly AccessTools.FieldRef<UIMultiAnswer, Transform> Target =
+        AccessTools.FieldRefAccess<UIMultiAnswer, Transform>("targetTransform");
     private static readonly AccessTools.FieldRef<UIMultiAnswerOption, UIMultiAnswer> MenuOf =
         AccessTools.FieldRefAccess<UIMultiAnswerOption, UIMultiAnswer>("multiAnswer");
     private static readonly AccessTools.FieldRef<UIMultiAnswerOption, AnswerVisualData> AnswerOf =
@@ -202,6 +204,21 @@ internal static class SharedAnswers
         Mirrors[(slot, id)] = menu;
         // The pointer here neither highlights nor chooses another player's answers.
         Canvas(menu).blocksRaycasts = false;
+    }
+
+    // A menu of this player's answers stands above their keeper, where their name tag would be, until its fade has
+    // ended; the game keeps each menu in its list until then.
+    internal static bool Answering(int slot)
+    {
+        var point = RemoteKeeper.BubblePoint(slot);
+        if (point == null)
+            return false;
+        foreach (var menu in Menus())
+        {
+            if (menu != null && Target(menu) == point)
+                return true;
+        }
+        return false;
     }
 
     private static UIMultiAnswerOption Option(int slot, int id, string answer)

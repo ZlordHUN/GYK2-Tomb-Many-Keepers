@@ -94,7 +94,7 @@ internal static class SharedSpeech
         if (anchor == null && (speaker != Speaker.Wgo || portrait))
             return;
         var line = new Line { Slot = slot, Id = id, Speaker = speaker, Anchor = anchor, Anchored = anchor != null,
-            Position = anchor != null ? anchor.position : default };
+            Position = anchor != null ? anchor.position : default, ByKeeper = speaker != Speaker.Wgo || portrait };
         line.Closed = () => Shown.Remove(line);
         Shown.Add(line);
         showing = line;
@@ -126,6 +126,22 @@ internal static class SharedSpeech
             if (line.Slot == slot)
                 line.Ended = true;
         }
+    }
+
+    // A bubble by this player's keeper's head, where their name tag would be, shows a line of their keeper, their wisp or
+    // a portrait character until the game takes it down: the line ends as the bubble starts closing, and the bubble
+    // lingers two frames and may fade before it goes.
+    internal static bool Speaking(int slot)
+    {
+        foreach (var placed in Placed)
+        {
+            var bubble = placed.Key;
+            var line = placed.Value;
+            if (bubble != null && line.Slot == slot && line.ByKeeper && bubble.gameObject.activeInHierarchy &&
+                PhraseOf(bubble).onFinished == line.Closed)
+                return true;
+        }
+        return false;
     }
 
     // A shared line speaks for the other player's keeper and is neither skipped nor timed out here.
@@ -214,6 +230,8 @@ internal static class SharedSpeech
         internal Transform Anchor;
         // Placed above the anchor here, where the game would place it above this game's own.
         internal bool Anchored;
+        // Shown by the speaking player's keeper's head: their keeper's line, their wisp's or a portrait character's.
+        internal bool ByKeeper;
         internal Vector3 Position;
         internal Action Closed;
         internal bool Ended;

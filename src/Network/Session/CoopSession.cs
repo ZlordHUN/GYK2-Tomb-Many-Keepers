@@ -21,7 +21,7 @@ namespace GYK2.TombManyKeepers.Network.Session;
 // game into keeper slots 2-4 by their identity and starts or continues its campaign once everyone is ready, releasing the party together once all
 // of them have loaded. Everyone's loading screen opens at the start and follows the host's loading,
 // the transfer of its game and everyone's own loading. A later player enters the lobby, readies up
-// and joins the running game.
+// and joins the running game. A save the host loads while others play starts the same way for everyone playing.
 // The host keeps every joined player's character in the campaign, decides every rescue, orders every
 // player's story transitions and relays every keeper's state and every player's changes to the
 // world. Each message starts with its type and the keeper slot it concerns.
@@ -31,7 +31,7 @@ internal sealed class CoopSession : MonoBehaviour
     // The host is always the lobby's first keeper.
     internal const int HostSlot = 1;
     internal const ushort GamePort = 34272;
-    internal const byte Protocol = 12;
+    internal const byte Protocol = 14;
     // Every game since this protocol tells its build right after its protocol, whatever it says after them; an older
     // game said its player's name there.
     private const byte BuildsTold = 11;
@@ -89,7 +89,9 @@ internal sealed class CoopSession : MonoBehaviour
         // A joined player asks the host to save; the host says whether it did, and shows everyone its saving.
         SaveRequest,
         Saved,
-        Saving
+        Saving,
+        // The host loads another save while the game runs; everyone playing loads it too.
+        Reload
     }
 
     private readonly Dictionary<HSteamNetConnection, int> peers = new Dictionary<HSteamNetConnection, int>();
@@ -98,6 +100,8 @@ internal sealed class CoopSession : MonoBehaviour
     private readonly string[] keys = new string[MaxPlayers + 1];
     private readonly ulong[] accounts = new ulong[MaxPlayers + 1];
     private readonly bool[] ready = new bool[MaxPlayers + 1];
+    // Each player's colour for their name, which the host gives as they arrive.
+    private readonly int[] colors = { PlayerColors.None, PlayerColors.None, PlayerColors.None, PlayerColors.None, PlayerColors.None };
     // Keepers that started chained in their bay: a new campaign's lobby, and players new to the
     // campaign joining while the host was chained.
     private readonly bool[] chained = new bool[MaxPlayers + 1];
@@ -149,6 +153,8 @@ internal sealed class CoopSession : MonoBehaviour
     private string joinPassword = string.Empty;
     private float nextReceiveReport;
     private float nextRequestedSave;
+    // Joined: the host loaded another save while this game still loaded the one before, which it leaves once loaded.
+    private bool leaveLoaded;
 
     internal static CoopSession Current { get; private set; }
     internal static event Action Admitted;
@@ -253,10 +259,14 @@ internal sealed class CoopSession : MonoBehaviour
         CharacterRecords.Clear();
         if (saved != null)
             CharacterRecords.LoadCampaign(saved);
+        PlayerColors.LoadCampaign(saved);
         session.LobbyKey = NewKey();
         session.names[1] = SteamFriends.GetPersonaName();
         session.accounts[1] = PlayerIdentity.SteamId;
-        session.ready[1] = true;
+        session.keys[1] = PlayerIdentity.Key(PlayerIdentity.SteamId, PlayerIdentity.Profile, sharedAccount: false);
+        session.colors[1] = PlayerColors.Pick(session.keys[1], Array.Empty<int>());
+        // As in GYK1, the host readies up too once others have joined; alone it starts at once.
+        session.ready[1] = false;
         session.introduced[1] = true;
         KeeperSpawn.KeeperAdded += session.ShareRescue;
         KeeperSpawn.BaysOpened += session.ShareBays;
@@ -328,22 +338,30 @@ internal sealed class CoopSession : MonoBehaviour
         EntryBarrier.Cancel();
         EntryStatus.End();
         LobbyChat.Clear();
+        CharacterRecords.Clear();
+        PlayerColors.Clear();
+        ForgetWorld();
+        // A joined campaign's keepers belong to its host.
+        if (!session.IsHost)
+            KeeperSpawn.Disable();
+        Destroy(session.gameObject);
+    }
+
+    // What this game shares of the game it plays, which a game loaded in its place starts without.
+    private static void ForgetWorld()
+    {
         SharedPresentation.Clear();
         SaveIndicator.Clear();
+        NameTags.Clear();
         RemoteKeeper.Clear();
         WorldSync.Clear();
         ObjectMotion.Clear();
         WorldDrops.Clear();
         WorldClock.Clear();
-        CharacterRecords.Clear();
         PersonalGrants.Clear();
         DropClaims.Clear();
         StationLeases.Clear();
         RestAgreement.Clear();
-        // A joined campaign's keepers belong to its host.
-        if (!session.IsHost)
-            KeeperSpawn.Disable();
-        Destroy(session.gameObject);
     }
 
     internal string PlayerName(int slot) => names[slot];
@@ -353,12 +371,20 @@ internal sealed class CoopSession : MonoBehaviour
 
     internal bool IsReady(int slot) => ready[slot];
 
+    // A player's colour for their name, or none.
+    internal int ColorOf(int slot) => names[slot] == null ? PlayerColors.None : colors[slot];
+
+    // The host starts alone at once, and with others once everyone, the host too, is ready.
+    internal bool CanStart => IsHost && InLobby && (peers.Count == 0 || AllReady);
+
     // Everyone in the lobby starts together; in a new campaign they all wake chained in their bays.
     internal bool StartGame()
     {
-        if (!IsHost || !InLobby || !AllReady)
+        if (!CanStart)
             return false;
         InLobby = false;
+        // Whoever plays counts as ready for a later player's lobby.
+        ready[LocalSlot] = true;
         newCampaign = campaign == null;
         EntryBarrier.Expect();
         if (newCampaign)
@@ -388,9 +414,64 @@ internal sealed class CoopSession : MonoBehaviour
         return true;
     }
 
+    // The host's Load Game while the game runs: the save it loads becomes the hosted campaign and starts as a saved
+    // campaign does from the lobby. Everyone playing leaves the old game for the loading screen and loads the new one
+    // behind the start barrier, as the character that save holds for them; players in the lobby see its card.
+    internal void LoadCampaign(SaveSlotData saved)
+    {
+        if (!IsHost || InLobby)
+            return;
+        campaign = saved;
+        newCampaign = false;
+        CampaignLabel = $"Saved game, day {saved.day}";
+        CharacterRecords.Clear();
+        CharacterRecords.LoadCampaign(saved);
+        // Everyone keeps their colour for the session, and the loaded campaign keeps it with its other players'.
+        PlayerColors.LoadCampaign(saved);
+        for (int slot = 1; slot <= MaxPlayers; slot++)
+        {
+            if (names[slot] != null && keys[slot] != null)
+                PlayerColors.Keep(keys[slot], colors[slot]);
+        }
+        // The night's pace belongs to the game left behind.
+        RestAgreement.FastForward(false);
+        ForgetWorld();
+        EntryBarrier.Expect();
+        KeeperSpawn.EnableContinued(LocalSlot);
+        MainGame.OnGameStarted -= HostStarted;
+        MainGame.OnGameStarted += HostStarted;
+        hostLoaded = false;
+        sharedEntry = -1;
+        holdingSince = releasedAt = -1f;
+        starting.Clear();
+        entrants.Clear();
+        Array.Clear(chained, 0, chained.Length);
+        Array.Clear(freed, 0, freed.Length);
+        Array.Clear(resting, 0, resting.Length);
+        foreach (var peer in peers)
+        {
+            int slot = peer.Value;
+            if (!playing[slot])
+                continue;
+            playing[slot] = false;
+            starting.Add(slot);
+            entrants.Add(slot);
+            receivedPercent[slot] = 0;
+            loadingGame[slot] = false;
+            if (!awaitingWorld.Contains(peer.Key))
+                awaitingWorld.Add(peer.Key);
+        }
+        EntryStatus.BeginHost(entrants.Count + 1);
+        Compose(Message.Reload, LocalSlot).Write(CampaignLabel);
+        WriteWorld(writer, campaign);
+        Broadcast(true);
+        Debug.Log($"[Multiplayer] Loading {CampaignLabel} from {saved.slotName} with {entrants.Count + 1} players");
+    }
+
+    // A joined player readies up in the lobby, or in a running game's lobby before joining it; the host only in its lobby.
     internal void SetReady(bool isReady)
     {
-        if (IsHost || LocalSlot == 0 || Joining || playing[LocalSlot] || !InLobby && StartedTogether)
+        if (LocalSlot == 0 || Joining || playing[LocalSlot] || (IsHost ? !InLobby : !InLobby && StartedTogether))
             return;
         ready[LocalSlot] = isReady;
         Compose(Message.Ready, LocalSlot).Write(isReady);
@@ -411,6 +492,13 @@ internal sealed class CoopSession : MonoBehaviour
     // A joined game has loaded the host's game; a starting party waits for the host's release.
     internal void Entered(bool barrier)
     {
+        // The host loaded another save while this game loaded the one before.
+        if (leaveLoaded)
+        {
+            leaveLoaded = false;
+            LeaveWorld();
+            return;
+        }
         if (pendingBays != null)
         {
             WorldSnapshot.OpenHostBays(new BinaryReader(new MemoryStream(pendingBays)));
@@ -435,6 +523,39 @@ internal sealed class CoopSession : MonoBehaviour
         EntryStatus.BeginJoined(names[1], later);
         hostContact = Time.unscaledTime;
         Loading?.Invoke();
+    }
+
+    // Joined: the host loads another save. This game drops the host's game it had or was receiving and waits for the
+    // loaded one as when everyone started together; a copy of the old game still loading is left once loaded.
+    private void FollowLoad()
+    {
+        download = null;
+        arrived = null;
+        worldArrived = false;
+        released = false;
+        playing[LocalSlot] = false;
+        deferred.Clear();
+        pendingWorld.Clear();
+        pendingBays = null;
+        StartedTogether = true;
+        Joining = false;
+        Debug.Log("[Multiplayer] The host is loading another save");
+        if (WorldSnapshot.IsLoading)
+            leaveLoaded = true;
+        else
+            LeaveWorld();
+    }
+
+    // Joined: the game this one played stays still behind the loading screen until the host's loaded game arrives.
+    private void LeaveWorld()
+    {
+        ForgetWorld();
+        KeeperSpawn.EnableJoined(LocalSlot);
+        BeginEntry(later: false);
+        var overlay = LazyUI.Get<UILoadingOverlay>();
+        if (!overlay.IsShown)
+            overlay.Draw(new LoadingWindowData(MainGame.EntrySceneToLoad, null));
+        EntryBarrier.HoldLeaving();
     }
 
     internal static void SendTrigger(int trigger)
@@ -596,6 +717,7 @@ internal sealed class CoopSession : MonoBehaviour
             StationLeases.Update();
             if (!EntryBarrier.Waiting)
                 PersonalGrants.Deliver();
+            NameTags.Follow();
         }
         if (LocalSlot == 0 || !RemoteKeeper.CanShare || Time.unscaledTime < nextState)
             return;
@@ -655,10 +777,16 @@ internal sealed class CoopSession : MonoBehaviour
         if (Current != this)
             return;
         // The lobby ends with its host.
-        string reason = LocalSlot == 0 ? "Could not reach the host."
+        Lose(LocalSlot == 0 ? "Could not reach the host."
             : !closedByPeer ? "Lost connection to the host."
-            : InLobby ? "The host closed the lobby." : "The host closed the game.";
-        if (!WorldSnapshot.IsLoading && !KeeperSpawn.Active)
+            : InLobby ? "The host closed the lobby." : "The host closed the game.");
+    }
+
+    // A joined game that loses its host in the menus says why there; one in a game, or loading one, returns to the
+    // main menu and says it there.
+    private static void Lose(string reason)
+    {
+        if (!WorldSnapshot.IsLoading && !KeeperSpawn.Active && MainGame.Instance.gameState != MainGame.GameState.InGame)
         {
             Fail(reason);
             return;
@@ -706,8 +834,9 @@ internal sealed class CoopSession : MonoBehaviour
             if (!peers.TryGetValue(connection, out slot) || !HandlePlayer(connection, message, slot, reader, data, length))
                 return;
         }
+        // A player's state that arrives after the host said they left would show their keeper again for good.
         else if (HandleJoined(message, slot, reader, data, length) || slot == 0 ||
-                 slot == LocalSlot && message == Message.State)
+                 message == Message.State && (slot == LocalSlot || names[slot] == null))
         {
             return;
         }
@@ -881,6 +1010,13 @@ internal sealed class CoopSession : MonoBehaviour
                 else if (slot == LocalSlot)
                     Notify("The host could not save the game right now.");
                 return true;
+            case Message.Reload:
+                CampaignLabel = reader.ReadString();
+                world = ReadWorld(reader);
+                // Players in the lobby only see the loaded save's card.
+                if (playing[LocalSlot])
+                    FollowLoad();
+                return true;
             case Message.Refused:
                 string reason = reader.ReadString();
                 if (reader.ReadBoolean())
@@ -893,7 +1029,7 @@ internal sealed class CoopSession : MonoBehaviour
                     Fail(reason);
                 return true;
             case Message.Chat:
-                LobbyChat.Add(slot, slot == 0 ? null : names[slot] ?? $"Keeper {slot}", LobbyChat.Clean(reader.ReadString()));
+                LobbyChat.Add(slot, slot == 0 ? null : names[slot] ?? $"Keeper {slot}", LobbyChat.Clean(reader.ReadString()), ColorOf(slot));
                 return true;
             case Message.Joined:
                 if (slot == 0)
@@ -902,6 +1038,7 @@ internal sealed class CoopSession : MonoBehaviour
                 ready[slot] = reader.ReadBoolean();
                 chained[slot] = reader.ReadBoolean();
                 accounts[slot] = reader.ReadUInt64();
+                colors[slot] = reader.ReadSByte();
                 if (slot == LocalSlot || introduced[slot])
                     return true;
                 introduced[slot] = true;
@@ -975,14 +1112,16 @@ internal sealed class CoopSession : MonoBehaviour
                     pendingBays = reader.ReadBytes(length - 2);
                 return true;
             case Message.World:
-                if (LocalSlot == 0 || InLobby || download != null || arrived != null || WorldSnapshot.IsLoading || KeeperSpawn.Active)
+                // A game the host loaded may arrive while this one still loads the host's game before it.
+                if (LocalSlot == 0 || InLobby || download != null || arrived != null || WorldSnapshot.IsLoading && !leaveLoaded ||
+                    KeeperSpawn.Active)
                     return true;
                 // The game was captured after every chain change sent before it.
                 deferred.Clear();
                 download = WorldSnapshot.Download.Begin(reader);
                 if (download == null)
                 {
-                    Fail("The host's game could not be received.");
+                    Lose("The host's game could not be received.");
                     return true;
                 }
                 worldArrived = true;
@@ -1009,7 +1148,7 @@ internal sealed class CoopSession : MonoBehaviour
                 if (!download.Add(data, 2, length - 2))
                 {
                     download = null;
-                    Fail("The host's game could not be received.");
+                    Lose("The host's game could not be received.");
                     return true;
                 }
                 hostContact = Time.unscaledTime;
@@ -1084,6 +1223,7 @@ internal sealed class CoopSession : MonoBehaviour
         names[slot] = name;
         keys[slot] = key;
         accounts[slot] = account;
+        colors[slot] = PlayerColors.Pick(key, TakenColors(slot));
         ready[slot] = false;
         chained[slot] = false;
         freed[slot] = false;
@@ -1125,7 +1265,7 @@ internal sealed class CoopSession : MonoBehaviour
     {
         if (text.Length == 0 || slot != 0 && names[slot] == null)
             return;
-        LobbyChat.Add(slot, slot == 0 ? null : names[slot], text);
+        LobbyChat.Add(slot, slot == 0 ? null : names[slot], text, ColorOf(slot));
         Compose(Message.Chat, slot).Write(text);
         foreach (var peer in peers)
             Send(peer.Key, true);
@@ -1148,6 +1288,19 @@ internal sealed class CoopSession : MonoBehaviour
         member.Write(ready[slot]);
         member.Write(chained[slot]);
         member.Write(accounts[slot]);
+        member.Write((sbyte)colors[slot]);
+    }
+
+    // The colours of the players present, but for this slot.
+    private List<int> TakenColors(int except)
+    {
+        var taken = new List<int>();
+        for (int slot = 1; slot <= MaxPlayers; slot++)
+        {
+            if (slot != except && names[slot] != null && PlayerColors.Valid(colors[slot]))
+                taken.Add(colors[slot]);
+        }
+        return taken;
     }
 
     // The hosted campaign's save card details for a joined player's lobby: when it was saved, the days
@@ -1230,7 +1383,7 @@ internal sealed class CoopSession : MonoBehaviour
             return true;
         if (Time.unscaledTime - hostContact > EntryTimeout)
         {
-            Fail("The host stopped sending its game.");
+            Lose("The host stopped sending its game.");
             return false;
         }
         if (phase == EntryStatus.Phase.Downloading && Time.unscaledTime >= nextReceiveReport)
@@ -1245,10 +1398,12 @@ internal sealed class CoopSession : MonoBehaviour
     // whole frame saying that it loads.
     private void LoadArrivedGame()
     {
-        if (arrived == null || Time.frameCount <= arrivedFrame + 1)
+        if (arrived == null || Time.frameCount <= arrivedFrame + 1 || leaveLoaded)
             return;
         var world = arrived;
         arrived = null;
+        // The game the host's load took this one from runs again for the native loading to replace it.
+        EntryBarrier.LetLoad();
         WorldSnapshot.Load(world);
         ReportEntry(loading: true);
     }
@@ -1437,6 +1592,7 @@ internal sealed class CoopSession : MonoBehaviour
         names[slot] = null;
         keys[slot] = null;
         accounts[slot] = 0;
+        colors[slot] = PlayerColors.None;
         ready[slot] = false;
         chained[slot] = false;
         introduced[slot] = false;

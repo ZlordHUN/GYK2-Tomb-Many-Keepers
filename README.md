@@ -15,6 +15,7 @@ An unofficial GYK2 mod, porting features from
 - Shared quests, unlocks and reputation, with story rewards for each player.
 - Synced world objects, drops, NPCs, time and weather; shared chests and crafting stations used by one player at a time.
 - Shared cutscenes, speech and dialogue choices within the same scene.
+- Other players' name tags with coloured outlines and matching names in lobby chat.
 - Individual sleeping; time advances quickly only when everyone sleeps.
 - Pause-menu **Save Game** and **Load Game**, with named new saves and overwriting existing saves.
 - Widescreen and ultrawide support, animated menu artwork and resolutions through 8K, including closer **x3** views at **3440×1440** and **5120×1440**.
@@ -24,8 +25,10 @@ An unofficial GYK2 mod, porting features from
 Choose **Multiplayer → Host Game**, select a campaign, then **Next** to choose
 the player limit (2–4) and access settings. **Next** opens the lobby. Guests use
 **Join Game → Internet** or **LAN**, select a game and **Connect**, then **Ready**.
-The host selects **Start Game** once everyone present is ready. Late joiners
-select **Ready → Join Game**. Right-click a listing to add it to **Favorites**.
+With guests present, everyone—including the host—selects **Ready**; ready avatars
+have gold outlines. The host then selects **Start Game**. A host alone can start
+immediately. Late joiners select **Ready → Join Game**. Right-click a listing to
+add it to **Favorites**.
 
 **Visibility:** Public and Password games appear on the Internet tab. Friends
 games accept the host's Steam friends over LAN; Private games require an invite.
@@ -35,9 +38,11 @@ codes, keeper customization and Cheats are unfinished. **Sample** listings are
 previews and cannot be joined.
 
 The host saves everyone's characters. A guest's **Save Game** asks the host to
-save; everyone sees the saving indicator. **Load Game** is hidden during co-op.
-New manual saves are separate snapshots; autosaves keep using the current slot.
-Keep `.tmk`, `.tmkhost` and `.tmkname` sidecars with campaign backups.
+save; everyone sees the saving indicator. Only the host has **Load Game** during
+co-op: active players load the selected campaign together, restoring their saved
+characters. New manual saves are separate snapshots; autosaves keep using the
+current slot. Keep `.tmk`, `.tmkhost`, `.tmkname` and `.tmkcolors` sidecars with
+campaign backups.
 Workers, player trading and dungeon fighting levels are not supported yet.
 The session ends when the host leaves.
 
@@ -54,7 +59,7 @@ saves can each be turned off after a restart. Existing files and saves are kept.
 
 ## Install
 
-Requires **Graveyard Keeper 2 1.006** (Windows Mono; target Steam build **25533739**)
+Requires **Graveyard Keeper 2 1.006** (Windows Mono)
 and **BepInEx 5.4.23.5 x64**, with Steam running for multiplayer.
 Every player needs the same `GYK2.TombManyKeepers.dll` and game version. The mod
 stays at 0.1; the browser flags incompatible builds or game versions and explains

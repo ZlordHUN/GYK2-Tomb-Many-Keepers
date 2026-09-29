@@ -1,6 +1,7 @@
 using System.Collections.Generic;
 using System.Net;
 using System.Text;
+using GYK2.TombManyKeepers.Multiplayer.Players;
 using GYK2.TombManyKeepers.Multiplayer.Session;
 using GYK2.TombManyKeepers.Network.Session;
 using GYK2.TombManyKeepers.Network.Steam;
@@ -18,9 +19,10 @@ namespace GYK2.TombManyKeepers.UI.Multiplayer;
 // corner below. Invite opens the friends to invite to the game; a screen wide enough shows them outright in a
 // column of their own on the right, the rest moved left to make room, and the Invite command goes, as does Show
 // Lobby Code, whose line stands under the world instead, in the chat field's row.
-// Everything is a copy of the game's own header plates, cells, text fields, buttons and save card. Joined
-// players ready up and the host starts once everyone is ready; a later player readies up in the running
-// game's lobby and joins it.
+// Everything is a copy of the game's own header plates, cells, text fields, buttons and save card. As in GYK1,
+// everyone readies up, each ready player's avatar lit in gold: the host alone starts at once, and with others
+// its Start Game becomes a Ready button like theirs until everyone is ready. A later player readies up in the
+// running game's lobby and joins it. Each player's name in the chat takes their colour.
 internal sealed class LobbyWindow : LazyWindow<LazyWidgetDataBase>
 {
     // Where GYK1's lobby has its parts, on the 640 by 360 screen: the columns' centres, and the rows'.
@@ -58,6 +60,7 @@ internal sealed class LobbyWindow : LazyWindow<LazyWidgetDataBase>
     private float nextListing;
     private LobbyPlayers players;
     private GameObject card;
+    private SaveSlotData shownWorld;
     private TMP_Text log;
     private ScrollRect scroll;
     private TMP_InputField input;
@@ -317,6 +320,7 @@ internal sealed class LobbyWindow : LazyWindow<LazyWidgetDataBase>
     // when it was saved, the days played and the graveyard's, church's and village's standing.
     private void ShowWorld(SaveSlotData world)
     {
+        shownWorld = world;
         if (card != null)
             DestroyImmediate(card);
         var slot = Instantiate(SaveCard(LazyUI.GetWindow<UISaveSlotsWindow>()), layout);
@@ -500,6 +504,9 @@ internal sealed class LobbyWindow : LazyWindow<LazyWidgetDataBase>
         var session = CoopSession.Current;
         if (session == null)
             return;
+        // The host's Load Game changes the world it hosts while later players wait here.
+        if (session.World != shownWorld)
+            ShowWorld(session.World);
         bool ready = session.IsReady(session.LocalSlot);
         // A later player readies up in the running game's lobby, then joins it.
         bool running = !session.IsHost && !session.InLobby && !session.StartedTogether;
@@ -514,23 +521,12 @@ internal sealed class LobbyWindow : LazyWindow<LazyWidgetDataBase>
         DrawPlayers(session);
         if (session.IsHost)
         {
-            int present = 0, readied = 0;
-            for (int slot = 1; slot <= CoopSession.MaxPlayers; slot++)
-            {
-                if (session.PlayerName(slot) == null)
-                    continue;
-                present++;
-                if (session.IsReady(slot))
-                    readied++;
-            }
-            // As GYK1's, the host's button counts who is ready until everyone is.
-            Draw(session.AllReady ? "Start Game" : $"Ready {readied}/{present}", () =>
-            {
-                if (CoopSession.Current?.AllReady == true)
-                    StartGame();
-                else
-                    Notice($"Waiting for players to ready up ({readied}/{present} ready).");
-            });
+            // The host alone starts at once; with others its Start Game becomes a Ready button like theirs, and
+            // returns once everyone, the host too, is ready.
+            if (session.CanStart)
+                Draw("Start Game", StartGame);
+            else
+                Draw(ready ? "Unready" : "Ready", ToggleHostReady);
         }
         else if (running)
         {
@@ -542,6 +538,35 @@ internal sealed class LobbyWindow : LazyWindow<LazyWidgetDataBase>
         }
         // The native buttons size themselves to their labels in the layout's pass.
         layout.RefreshContentFitter();
+    }
+
+    // The host readies up or stops being ready; readied, it hears whom the game still waits for, as GYK1's host did.
+    private static void ToggleHostReady()
+    {
+        var session = CoopSession.Current;
+        if (session == null)
+            return;
+        bool readying = !session.IsReady(session.LocalSlot);
+        session.SetReady(readying);
+        if (!readying || session.CanStart)
+            return;
+        var (readied, present) = Readiness(session);
+        Notice($"Waiting for players to ready up ({readied}/{present} ready).");
+    }
+
+    // How many players present are ready, of how many.
+    private static (int readied, int present) Readiness(CoopSession session)
+    {
+        int present = 0, readied = 0;
+        for (int slot = 1; slot <= CoopSession.MaxPlayers; slot++)
+        {
+            if (session.PlayerName(slot) == null)
+                continue;
+            present++;
+            if (session.IsReady(slot))
+                readied++;
+        }
+        return (readied, present);
     }
 
     private void Draw(string text, System.Action pressed)
@@ -573,7 +598,9 @@ internal sealed class LobbyWindow : LazyWindow<LazyWidgetDataBase>
                 text.Append("<color=").Append(SystemTag).Append(">[System]</color> <color=").Append(SystemText).Append('>')
                     .Append(NativeWindow.Literal(line.Text)).Append("</color>");
             else
-                text.Append("<color=").Append(NameColor).Append('>').Append(NativeWindow.Literal(line.Name)).Append(":</color> <color=")
+                // A player's name in their colour, as GYK1's chat shows it.
+                text.Append("<color=").Append(PlayerColors.Valid(line.Color) ? PlayerColors.Hex(line.Color) : NameColor).Append('>')
+                    .Append(NativeWindow.Literal(line.Name)).Append(":</color> <color=")
                     .Append(SaidColor).Append('>').Append(NativeWindow.Literal(line.Text)).Append("</color>");
         }
         return text.ToString();
@@ -588,7 +615,7 @@ internal sealed class LobbyWindow : LazyWindow<LazyWidgetDataBase>
 
     private void StartGame()
     {
-        if (!CoopSession.Current.StartGame())
+        if (CoopSession.Current?.StartGame() != true)
             return;
         Leave();
         MultiplayerMenu.Start(menu);

@@ -11,7 +11,7 @@ namespace GYK2.TombManyKeepers.UI.Saves;
 // Save Game and Load Game first in the game's pause menu, as GYK1's followed Continue, which this menu does not have:
 // copies of its own Settings button, with its art, sounds and gamepad navigation. Save Game opens the game's save list
 // to save into and Load Game the list to load from. In a multiplayer game a joined player's Save Game asks the host to
-// save the campaign, and nobody loads another save while the game is shared.
+// save the campaign, and only the host loads, taking everyone playing into the save it loads.
 [HarmonyPatch(typeof(UIGamePauseWindow))]
 internal static class PauseMenuPatches
 {
@@ -36,10 +36,11 @@ internal static class PauseMenuPatches
         var load = ___settingsBtn == null ? null : ___settingsBtn.transform.parent.Find(LoadName);
         if (load == null)
             return;
-        bool shared = CoopSession.Current != null;
-        if (load.gameObject.activeSelf == !shared)
+        // A joined player's game holds no campaign of its own to replace.
+        bool joined = CoopSession.IsGuest;
+        if (load.gameObject.activeSelf == !joined)
             return;
-        load.gameObject.SetActive(!shared);
+        load.gameObject.SetActive(!joined);
         ((RectTransform)__instance.transform).RefreshContentFitter();
         __instance.GetComponent<GamepadNavigationController>().ReinitItems(focusOnFirstActive: LazyInput.IsGamepadActive);
     }

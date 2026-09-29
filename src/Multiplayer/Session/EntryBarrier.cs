@@ -5,7 +5,8 @@ namespace GYK2.TombManyKeepers.Multiplayer.Session;
 
 // Nobody plays until everyone starting together has loaded the campaign. Each game keeps its
 // loading screen up, its world paused and its keeper still; the host also holds the story's
-// start, and its release sets everyone going together.
+// start, and its release sets everyone going together. A joined game the host's Load Game takes
+// into another save holds the world it leaves the same way until the new one arrives.
 [HarmonyPatch]
 internal static class EntryBarrier
 {
@@ -26,6 +27,22 @@ internal static class EntryBarrier
         holding = true;
         MainGame.UpdateManager.IsActive = false;
         MainGame.PlayerController.SetControlTakenType(TakenControlType.ByCinematics, isEnabled: false);
+    }
+
+    // A game leaving the world it plays for another keeps that world still behind its loading screen.
+    internal static void HoldLeaving()
+    {
+        Expect();
+        Hold();
+    }
+
+    // The world left behind runs again for the native loading that replaces it; the start is still awaited.
+    internal static void LetLoad()
+    {
+        if (!holding)
+            return;
+        Finish();
+        expected = true;
     }
 
     internal static void Release()
