@@ -13,6 +13,10 @@ namespace GYK2.TombManyKeepers.Multiplayer.Fighting;
 [HarmonyPatch]
 internal static class FightDeaths
 {
+    // Set when the agent's AI starts, which never happens in a joined player's game.
+    private static readonly AccessTools.FieldRef<FightingAgent, Wgo> AgentWgo =
+        AccessTools.FieldRefAccess<FightingAgent, Wgo>("wgo");
+
     private static readonly HashSet<Guid> sent = new HashSet<Guid>();
     private static bool showing;
 
@@ -52,6 +56,8 @@ internal static class FightDeaths
             Debug.LogWarning($"[Multiplayer] Could not show the death of {id}: {(wgo == null ? "no view" : "no fighting agent")}");
             return;
         }
+        if (AgentWgo(agent) == null)
+            AgentWgo(agent) = wgo;
         showing = true;
         try
         {
