@@ -49,7 +49,8 @@ internal static class WorldSync
         FightStop,
         FightPrepare,
         FightEnemy,
-        FightMotion
+        FightMotion,
+        FightDeath
     }
 
     // Reliable messages hold at most 512 KiB.
@@ -257,6 +258,9 @@ internal static class WorldSync
                 break;
             case Change.FightMotion:
                 Fighting.FightMotion.Apply(reader);
+                break;
+            case Change.FightDeath:
+                FightDeaths.Apply(reader);
                 break;
             default:
                 ObjectState.Apply(change, reader);
