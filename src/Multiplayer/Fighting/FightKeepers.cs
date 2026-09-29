@@ -17,7 +17,7 @@ namespace GYK2.TombManyKeepers.Multiplayer.Fighting;
 internal static class FightKeepers
 {
     private const float Interval = 0.2f;
-    private const float NameClearance = 0.4f;
+    private const float NameClearance = 0.6f;
 
     private static readonly AccessTools.FieldRef<PlayerController, bool> ArmorView =
         AccessTools.FieldRefAccess<PlayerController, bool>("isArmorViewActive");

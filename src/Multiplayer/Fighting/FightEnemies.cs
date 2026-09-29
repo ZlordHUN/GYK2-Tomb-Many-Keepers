@@ -17,7 +17,7 @@ internal static class FightEnemies
     // An enemy's object can arrive a little before its view exists.
     private const float WaitForView = 5f;
 
-    private static readonly List<(Guid id, int line, float until)> pending = new List<(Guid, int, float)>();
+    private static readonly List<(Guid id, int line, bool active, float until)> pending = new List<(Guid, int, bool, float)>();
 
     [HarmonyPostfix]
     [HarmonyPatch(typeof(FightingGameController), nameof(FightingGameController.RegisterTargetNonPersistent))]
@@ -27,10 +27,13 @@ internal static class FightEnemies
             entity is not Wgo wgo || wgo.Data == null)
             return;
         var id = wgo.Data.UniqueId.Guid;
+        // Decided here from the host's own list, which a joined player's game never fills.
+        bool active = GameBalance.Me.fighterWgoIdsCache.Contains(wgo.Id);
         WorldSync.Queue(WorldSync.Change.FightEnemy, id, writer =>
         {
             WorldSync.WriteId(writer, id);
             writer.Write(lineId);
+            writer.Write(active);
         });
     }
 
@@ -38,8 +41,9 @@ internal static class FightEnemies
     {
         var id = WorldSync.ReadId(reader);
         int line = reader.ReadInt32();
-        if (!TryRegister(id, line))
-            pending.Add((id, line, Time.unscaledTime + WaitForView));
+        bool active = reader.ReadBoolean();
+        if (!TryRegister(id, line, active))
+            pending.Add((id, line, active, Time.unscaledTime + WaitForView));
     }
 
     [HarmonyPostfix]
@@ -48,8 +52,8 @@ internal static class FightEnemies
     {
         for (int i = pending.Count - 1; i >= 0; i--)
         {
-            var (id, line, until) = pending[i];
-            if (TryRegister(id, line))
+            var (id, line, active, until) = pending[i];
+            if (TryRegister(id, line, active))
                 pending.RemoveAt(i);
             else if (Time.unscaledTime > until)
             {
@@ -63,7 +67,7 @@ internal static class FightEnemies
     [HarmonyPatch(typeof(FightingGameController), nameof(FightingGameController.Stop))]
     private static void Stopped() => pending.Clear();
 
-    private static bool TryRegister(Guid id, int line)
+    private static bool TryRegister(Guid id, int line, bool active)
     {
         var controller = LazySingleton<FightingGameController>.Instance;
         if (controller.CurrentFightState != FightState.ActiveFight)
@@ -72,7 +76,7 @@ internal static class FightEnemies
         if (wgo == null)
             return false;
         controller.RegisterTargetNonPersistent(wgo, line);
-        wgo.IsActiveCombatant = GameBalance.Me.fighterWgoIdsCache.Contains(wgo.Id);
+        wgo.IsActiveCombatant = active;
         return true;
     }
 }
