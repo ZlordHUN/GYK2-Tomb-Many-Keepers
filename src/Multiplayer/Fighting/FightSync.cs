@@ -12,6 +12,67 @@ namespace GYK2.TombManyKeepers.Multiplayer.Fighting;
 [HarmonyPatch]
 internal static class FightSync
 {
+    private enum Request : byte
+    {
+        Prepare,
+        Start
+    }
+
+    // Set while a joined player's game follows the host into a battle.
+    private static int fromHost;
+    // A joined player's wish to prepare or start, which the host carries out on its next frame.
+    private static (Request kind, string id)? requested;
+
+    // A joined player's own game never begins a battle, say by taking the flag: it asks the host.
+    [HarmonyPrefix]
+    [HarmonyPatch(typeof(FightingGameController), nameof(FightingGameController.StartPreFight))]
+    private static bool AskToPrepare(string levelId) => HostBegins(Request.Prepare, levelId);
+
+    [HarmonyPrefix]
+    [HarmonyPatch(typeof(FightingGameController), nameof(FightingGameController.Play), new Type[0])]
+    private static bool AskToStart(FightingGameController __instance) =>
+        HostBegins(Request.Start, __instance.CurrentLevel != null ? __instance.CurrentLevelId : string.Empty);
+
+    private static bool HostBegins(Request kind, string id)
+    {
+        if (!CoopSession.IsGuest || fromHost > 0)
+            return true;
+        if (WorldSync.Sharing)
+        {
+            Debug.Log($"[Multiplayer] Asking the host to {kind.ToString().ToLowerInvariant()} the battle {id}");
+            WorldSync.Queue(WorldSync.Change.FightRequest, Guid.Empty, writer =>
+            {
+                writer.Write((byte)kind);
+                writer.Write(id ?? string.Empty);
+            });
+        }
+        return false;
+    }
+
+    internal static void ApplyRequest(BinaryReader reader)
+    {
+        var kind = (Request)reader.ReadByte();
+        string id = reader.ReadString();
+        if (CoopSession.IsHosting)
+            requested = (kind, id);
+    }
+
+    // Outside the applied stream, so what the host begins is shared as its own.
+    [HarmonyPostfix]
+    [HarmonyPatch(typeof(FightingGameController), "Update")]
+    private static void CarryOutRequest(FightingGameController __instance)
+    {
+        if (requested == null || !CoopSession.IsHosting)
+            return;
+        var (kind, id) = requested.Value;
+        requested = null;
+        Debug.Log($"[Multiplayer] A joined player asked to {kind.ToString().ToLowerInvariant()} the battle {id}");
+        if (kind == Request.Prepare && __instance.CurrentFightState == FightState.Disabled && !string.IsNullOrEmpty(id))
+            __instance.StartPreFight(id);
+        else if (kind == Request.Start && __instance.CurrentFightState == FightState.InPreFight)
+            __instance.Play();
+    }
+
     // Preparing: lines and the countdown show before the first wave.
     [HarmonyPostfix]
     [HarmonyPatch(typeof(FightingGameController), nameof(FightingGameController.StartPreFight))]
@@ -54,7 +115,15 @@ internal static class FightSync
     {
         string id = reader.ReadString();
         Debug.Log($"[Multiplayer] The host is preparing the battle {id}");
-        LazySingleton<FightingGameController>.Instance.StartPreFight(id);
+        fromHost++;
+        try
+        {
+            LazySingleton<FightingGameController>.Instance.StartPreFight(id);
+        }
+        finally
+        {
+            fromHost--;
+        }
     }
 
     internal static void ApplyStart(BinaryReader reader)
@@ -62,7 +131,15 @@ internal static class FightSync
         string id = reader.ReadString();
         var controller = LazySingleton<FightingGameController>.Instance;
         Debug.Log($"[Multiplayer] The host started the battle {id}");
-        controller.Play(id);
+        fromHost++;
+        try
+        {
+            controller.Play(id);
+        }
+        finally
+        {
+            fromHost--;
+        }
     }
 
     internal static void ApplyStop(BinaryReader reader)
