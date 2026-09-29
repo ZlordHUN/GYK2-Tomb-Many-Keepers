@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Reflection;
+using GYK2.TombManyKeepers.Multiplayer.Fighting;
 using GYK2.TombManyKeepers.Multiplayer.Progression;
 using GYK2.TombManyKeepers.Network.Session;
 using HarmonyLib;
@@ -43,7 +44,9 @@ internal static class WorldSync
         ToolTick,
         Quest,
         Knowledge,
-        Reputation
+        Reputation,
+        FightStart,
+        FightStop
     }
 
     // Reliable messages hold at most 512 KiB.
@@ -236,6 +239,12 @@ internal static class WorldSync
                 break;
             case Change.Reputation:
                 SharedKnowledge.ApplyReputation(reader);
+                break;
+            case Change.FightStart:
+                FightSync.ApplyStart(reader);
+                break;
+            case Change.FightStop:
+                FightSync.ApplyStop(reader);
                 break;
             default:
                 ObjectState.Apply(change, reader);
