@@ -106,6 +106,17 @@ internal static class FightSync
     [HarmonyPatch(typeof(FightingLevelPresetProcessor), nameof(FightingLevelPresetProcessor.StartPreset))]
     private static bool HostRunsPhases() => !CoopSession.IsGuest;
 
+    // A breach hands the enemies to the line's group, and the group orders them about: the host's
+    // to do. A joined player's enemies have no AI to take the orders.
+    [HarmonyPrefix]
+    [HarmonyPatch(typeof(FightingLine), "HandleLineBreachedByEnemies")]
+    private static bool HostHandlesBreach() => !CoopSession.IsGuest;
+
+    [HarmonyPrefix]
+    [HarmonyPatch(typeof(AgentsGroupBehaviourController), nameof(AgentsGroupBehaviourController.CustomUpdate))]
+    private static bool HostOrdersGroups() =>
+        !CoopSession.IsGuest || LazySingleton<FightingGameController>.Instance.CurrentFightState == FightState.Disabled;
+
     // The host's allies arrive as world objects; spawning them again would double them.
     [HarmonyPrefix]
     [HarmonyPatch(typeof(FightingLevel), nameof(FightingLevel.SpawnAllies))]

@@ -10,16 +10,16 @@ using UnityEngine;
 
 namespace GYK2.TombManyKeepers.Multiplayer.Fighting;
 
-// Any keeper commands the party with its flag (design doc: the latest order wins). A joined player's
-// take or placement of a flag is replayed in the host's game by the game's own handler, and the host
-// then keeps the flag on that player's keeper, so the host's allies follow them.
+// Any keeper commands the party with its flag (design doc: the latest order wins). Each player's take
+// or placement of a flag is replayed in the others' games by the game's own handler, and they keep the
+// flag on that player's keeper; in the host's game the allies then follow it.
 [HarmonyPatch]
 internal static class FightFlags
 {
     private static readonly AccessTools.FieldRef<WGOInteractionHandlerBase, Wgo> Assigned =
         AccessTools.FieldRefAccess<WGOInteractionHandlerBase, Wgo>("assignedWgo");
 
-    // Host: flags that joined players carry, by their slot.
+    // Flags that other players carry, by their slot.
     private static readonly Dictionary<int, Wgo> carried = new Dictionary<int, Wgo>();
 
     [HarmonyPostfix]
@@ -36,7 +36,7 @@ internal static class FightFlags
     {
         var session = CoopSession.Current;
         var target = Assigned(handler);
-        if (!done || !CoopSession.IsGuest || !WorldSync.Sharing || interactor != MainGame.PlayerController ||
+        if (!done || session == null || !WorldSync.Sharing || interactor != MainGame.PlayerController ||
             target == null || target.Data == null)
             return;
         int slot = session.LocalSlot;
@@ -52,22 +52,23 @@ internal static class FightFlags
     {
         int slot = reader.ReadByte();
         var target = GameScene.GetWgoViewGlobal(new SGuid(WorldSync.ReadId(reader)));
-        if (!CoopSession.IsHosting || target == null || target.InteractionHandler == null)
+        var session = CoopSession.Current;
+        if (session == null || slot == session.LocalSlot || target == null || target.InteractionHandler == null)
             return;
-        // The host's keeper stands in for the joined one for this one interaction, then gets its own flag back.
-        var host = MainGame.PlayerController;
-        var own = host.attachedWgo;
+        // This game's keeper stands in for the other one for this one interaction, then gets its own flag back.
+        var me = MainGame.PlayerController;
+        var own = me.attachedWgo;
         carried.TryGetValue(slot, out var theirs);
-        host.attachedWgo = theirs;
+        me.attachedWgo = theirs;
         try
         {
-            target.InteractionHandler.Interact(host);
+            target.InteractionHandler.Interact(me);
         }
         finally
         {
-            var now = host.attachedWgo;
-            host.attachedWgo = own;
-            host.View.Banner.Show(own != null, own != null ? own.Data.MainWgoPartData.variationId : "");
+            var now = me.attachedWgo;
+            me.attachedWgo = own;
+            me.View.Banner.Show(own != null, own != null ? own.Data.MainWgoPartData.variationId : "");
             if (now != null)
                 carried[slot] = now;
             else
@@ -81,7 +82,7 @@ internal static class FightFlags
     [HarmonyPatch(typeof(FightingGameController), "Update")]
     private static void Follow()
     {
-        if (carried.Count == 0 || !CoopSession.IsHosting)
+        if (carried.Count == 0 || CoopSession.Current == null)
             return;
         foreach (var pair in carried)
         {
