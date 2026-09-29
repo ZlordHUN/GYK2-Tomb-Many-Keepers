@@ -77,6 +77,21 @@ internal static class FightEnemies
             return false;
         controller.RegisterTargetNonPersistent(wgo, line);
         wgo.IsActiveCombatant = active;
+        PrepareToBeHit(wgo);
         return true;
+    }
+
+    // A hit reads the target's armour from its attack part, which only the AI's start sets up.
+    private static void PrepareToBeHit(Wgo wgo)
+    {
+        var attack = wgo.GetComponentInChildren<AttackComponent>();
+        if (attack == null || attack.IsInitialized)
+            return;
+        var fighter = GameBalance.Me.GetData<FighterDef>(wgo.Id);
+        if (fighter == null)
+            return;
+        attack.Init(wgo, fighter);
+        attack.animationComponent = wgo.GetComponentInChildren<AnimationComponent>();
+        attack.teamType = wgo.TeamType;
     }
 }
