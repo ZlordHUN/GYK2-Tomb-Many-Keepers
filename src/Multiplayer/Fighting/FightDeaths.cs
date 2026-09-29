@@ -16,7 +16,8 @@ internal static class FightDeaths
     private static readonly HashSet<Guid> sent = new HashSet<Guid>();
     private static bool showing;
 
-    [HarmonyPostfix]
+    // Before the death runs: it removes the enemy, and that removal must reach others second.
+    [HarmonyPrefix]
     [HarmonyPatch(typeof(FightingAgent), nameof(FightingAgent.PlayDying))]
     private static void Died(FightingAgent __instance)
     {
@@ -42,9 +43,15 @@ internal static class FightDeaths
 
     internal static void Apply(BinaryReader reader)
     {
-        var wgo = GameScene.GetWgoViewGlobal(new SGuid(WorldSync.ReadId(reader)));
-        if (wgo == null || wgo.MainWgoPart == null || !wgo.MainWgoPart.TryGetComponent<FightingAgent>(out var agent))
+        var id = WorldSync.ReadId(reader);
+        var wgo = GameScene.GetWgoViewGlobal(new SGuid(id));
+        var part = wgo != null ? wgo.MainWgoPart : null;
+        if (part == null || !(part.TryGetComponent<FightingAgent>(out var agent) ||
+                              (agent = wgo.GetComponentInChildren<FightingAgent>(includeInactive: true)) != null))
+        {
+            Debug.LogWarning($"[Multiplayer] Could not show the death of {id}: {(wgo == null ? "no view" : "no fighting agent")}");
             return;
+        }
         showing = true;
         try
         {
