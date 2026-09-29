@@ -10,6 +10,13 @@ namespace GYK2.TombManyKeepers.Multiplayer.World;
 [HarmonyPatch(typeof(GameSceneData))]
 internal static class WorldObjects
 {
+    // A copy made from the stream skips the field's starting value, which lifts the object's
+    // bubbles and health bars to its head.
+    private static readonly AccessTools.FieldRef<WgoData, Vector3> BubbleOffset =
+        AccessTools.FieldRefAccess<WgoData, Vector3>("bubblePosOffset");
+    private static readonly Vector3 DefaultBubbleOffset =
+        (Vector3)AccessTools.Field(typeof(WgoData), "NPC_BUBBLE_Y_OFFSET").GetValue(null);
+
     [HarmonyPostfix]
     [HarmonyPatch(nameof(GameSceneData.AddWgoData), typeof(WgoData), typeof(bool))]
     private static void Added(GameSceneData __instance, WgoData wgoData) => Share(__instance, wgoData);
@@ -67,6 +74,8 @@ internal static class WorldObjects
         if (existing != null)
             MainGame.WorldData.GetGameSceneDataById(existing.WorldId)?.RemoveWgoData(existing, clearCraftComponent: false);
         data.PrepareForGame();
+        if (BubbleOffset(data) == Vector3.zero)
+            BubbleOffset(data) = DefaultBubbleOffset;
         scene.AddWgoData(data, recheckVisibilityOnSpawn: true);
     }
 
