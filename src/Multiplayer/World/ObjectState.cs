@@ -18,6 +18,8 @@ internal static class ObjectState
         AccessTools.FieldRefAccess<WgoData, List<InteractionEvent>>("events");
     private static readonly Action<WgoData> NotifyEvents =
         AccessTools.MethodDelegate<Action<WgoData>>(AccessTools.Method(typeof(WgoData), "NotifyInteractionEventChanged"));
+    // What shows the health bar; setting the value alone never raises it.
+    private static readonly FieldInfo FirstDamage = AccessTools.Field(typeof(HPComponent), nameof(HPComponent.OnFirstDamageDealt));
 
     [HarmonyPostfix]
     [HarmonyPatch(nameof(WgoData.IsHidden), MethodType.Setter)]
@@ -172,8 +174,11 @@ internal static class ObjectState
                 data.SetCustomAnimationTrigger(reader.ReadString());
                 break;
             case WorldSync.Change.Hp:
+                bool wasDamaged = data.HpComponent.wasDamagedAtLeastOnce;
                 data.HpComponent.SetCustomHpValue(reader.ReadInt32(), overrideMaxHpValue: false);
                 data.HpComponent.wasDamagedAtLeastOnce = reader.ReadBoolean();
+                if (!wasDamaged && data.HpComponent.wasDamagedAtLeastOnce)
+                    (FirstDamage?.GetValue(data.HpComponent) as Action)?.Invoke();
                 break;
             case WorldSync.Change.ToolTick:
                 data.NotifyApplyTool(reader.ReadBoolean());
