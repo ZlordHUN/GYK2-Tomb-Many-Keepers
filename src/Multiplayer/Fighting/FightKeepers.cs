@@ -17,6 +17,7 @@ namespace GYK2.TombManyKeepers.Multiplayer.Fighting;
 internal static class FightKeepers
 {
     private const float Interval = 0.2f;
+    private const float NameClearance = 0.4f;
 
     private static readonly AccessTools.FieldRef<PlayerController, bool> ArmorView =
         AccessTools.FieldRefAccess<PlayerController, bool>("isArmorViewActive");
@@ -156,8 +157,9 @@ internal static class FightKeepers
         {
             get
             {
+                // Above the player's name, which stands on the same point.
                 var point = RemoteKeeper.BubblePoint(slot);
-                return point != null ? point.position : Vector3.zero;
+                return point != null ? point.position + Vector3.up * NameClearance : Vector3.zero;
             }
         }
     }
