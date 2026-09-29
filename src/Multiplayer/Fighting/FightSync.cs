@@ -12,6 +12,16 @@ namespace GYK2.TombManyKeepers.Multiplayer.Fighting;
 [HarmonyPatch]
 internal static class FightSync
 {
+    // Preparing: lines and the countdown show before the first wave.
+    [HarmonyPostfix]
+    [HarmonyPatch(typeof(FightingGameController), nameof(FightingGameController.StartPreFight))]
+    private static void Preparing(FightingGameController __instance, string levelId)
+    {
+        if (!CoopSession.IsHosting || !WorldSync.Sharing || __instance.CurrentFightState != FightState.InPreFight)
+            return;
+        WorldSync.Queue(WorldSync.Change.FightPrepare, Guid.Empty, writer => writer.Write(levelId));
+    }
+
     [HarmonyPostfix]
     [HarmonyPatch(typeof(FightingGameController), nameof(FightingGameController.Play), new Type[0])]
     private static void Started(FightingGameController __instance)
@@ -39,6 +49,13 @@ internal static class FightSync
     [HarmonyPrefix]
     [HarmonyPatch(typeof(FightingLevel), nameof(FightingLevel.SpawnAllies))]
     private static bool HostSpawnsAllies() => !CoopSession.IsGuest;
+
+    internal static void ApplyPrepare(BinaryReader reader)
+    {
+        string id = reader.ReadString();
+        Debug.Log($"[Multiplayer] The host is preparing the battle {id}");
+        LazySingleton<FightingGameController>.Instance.StartPreFight(id);
+    }
 
     internal static void ApplyStart(BinaryReader reader)
     {

@@ -46,7 +46,9 @@ internal static class WorldSync
         Knowledge,
         Reputation,
         FightStart,
-        FightStop
+        FightStop,
+        FightPrepare,
+        FightEnemy
     }
 
     // Reliable messages hold at most 512 KiB.
@@ -245,6 +247,12 @@ internal static class WorldSync
                 break;
             case Change.FightStop:
                 FightSync.ApplyStop(reader);
+                break;
+            case Change.FightPrepare:
+                FightSync.ApplyPrepare(reader);
+                break;
+            case Change.FightEnemy:
+                FightEnemies.Apply(reader);
                 break;
             default:
                 ObjectState.Apply(change, reader);
