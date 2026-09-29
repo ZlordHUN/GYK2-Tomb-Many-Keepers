@@ -53,7 +53,11 @@ internal static class FightMotion
 
     [HarmonyPostfix]
     [HarmonyPatch(typeof(FightingGameController), nameof(FightingGameController.Stop))]
-    private static void Stopped() => tracks.Clear();
+    private static void Stopped()
+    {
+        tracks.Clear();
+        ownHits.Clear();
+    }
 
     // From preparing to the end, a joined player's fighters, allies too, only follow the host.
     [HarmonyPrefix]
@@ -134,11 +138,26 @@ internal static class FightMotion
         (ProgressChanged?.GetValue(processor) as Action<float>)?.Invoke(normalized);
     }
 
+    // This player's own hits, which reach the host a moment after the host's last health went out.
+    private const float OwnHitGrace = 0.5f;
+    private static readonly Dictionary<HPComponent, float> ownHits = new Dictionary<HPComponent, float>();
+
+    [HarmonyPostfix]
+    [HarmonyPatch(typeof(HPComponent), nameof(HPComponent.ApplyDamage))]
+    private static void OwnHit(HPComponent __instance)
+    {
+        if (CoopSession.IsGuest && !WorldSync.Applying)
+            ownHits[__instance] = Time.unscaledTime;
+    }
+
     // Health as the host has it; the first loss shows the bar. Death is the host's to send.
     // The host's battle can raise a fighter's maximum, as it does for the town guards.
     private static void ShowHp(HPComponent component, int hp, int maxHp)
     {
         if (component == null || hp <= 0)
+            return;
+        // The host has not heard of this player's hit yet: keep it rather than heal back.
+        if (hp > component.Hp && ownHits.TryGetValue(component, out float at) && Time.unscaledTime - at < OwnHitGrace)
             return;
         if (maxHp > 0 && component.MaxHpValue != maxHp)
         {
