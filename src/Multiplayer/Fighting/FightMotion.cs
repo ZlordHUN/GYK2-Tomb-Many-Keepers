@@ -35,8 +35,8 @@ internal static class FightMotion
     }
 
     private static readonly Dictionary<Guid, Track> tracks = new Dictionary<Guid, Track>();
-    private static readonly List<(Guid id, Vector3 position, float direction, int state, int hp)> snapshot =
-        new List<(Guid, Vector3, float, int, int)>();
+    private static readonly List<(Guid id, Vector3 position, float direction, int state, int hp, int maxHp)> snapshot =
+        new List<(Guid, Vector3, float, int, int, int)>();
     private static float nextSend;
 
     [HarmonyPostfix]
@@ -76,8 +76,9 @@ internal static class FightMotion
             var animator = animation?.Animator;
             float direction = animator != null ? animator.GetFloat(AnimationComponentBase.idDirectionAnimator) : 0f;
             int state = animation != null ? (int)animation.GetState() : (int)AnimationState.Idle;
-            int hp = wgo.Data.HpComponent != null ? wgo.Data.HpComponent.Hp : -1;
-            snapshot.Add((wgo.Data.UniqueId.Guid, wgo.Data.Position, direction, state, hp));
+            var health = wgo.Data.HpComponent;
+            snapshot.Add((wgo.Data.UniqueId.Guid, wgo.Data.Position, direction, state,
+                health != null ? health.Hp : -1, health != null ? health.MaxHpValue : -1));
         }
         var processor = Processor(controller);
         float progress = processor.CurrentProgress, normalized = processor.ProgressNormalized;
@@ -87,7 +88,7 @@ internal static class FightMotion
             writer.Write(progress);
             writer.Write(normalized);
             writer.Write(enemies.Length);
-            foreach (var (id, position, direction, state, hp) in enemies)
+            foreach (var (id, position, direction, state, hp, maxHp) in enemies)
             {
                 WorldSync.WriteId(writer, id);
                 writer.Write(position.x);
@@ -96,6 +97,7 @@ internal static class FightMotion
                 writer.Write(direction);
                 writer.Write((short)state);
                 writer.Write(hp);
+                writer.Write(maxHp);
             }
         });
     }
@@ -113,13 +115,13 @@ internal static class FightMotion
             var position = new Vector3(reader.ReadSingle(), reader.ReadSingle(), reader.ReadSingle());
             float direction = reader.ReadSingle();
             int state = reader.ReadInt16();
-            int hp = reader.ReadInt32();
+            int hp = reader.ReadInt32(), maxHp = reader.ReadInt32();
             if (!tracks.TryGetValue(id, out var track))
                 tracks[id] = track = new Track { to = position };
             // The next leg starts where the enemy is shown now, so it never jumps back.
             var wgo = GameScene.GetWgoViewGlobal(new SGuid(id));
             if (wgo != null && wgo.Data != null)
-                ShowHp(wgo.Data.HpComponent, hp);
+                ShowHp(wgo.Data.HpComponent, hp, maxHp);
             track.from = wgo != null && wgo.Data != null ? wgo.Data.Position : track.to;
             track.to = position;
             track.since = Time.unscaledTime;
@@ -133,11 +135,20 @@ internal static class FightMotion
     }
 
     // Health as the host has it; the first loss shows the bar. Death is the host's to send.
-    private static void ShowHp(HPComponent component, int hp)
+    // The host's battle can raise a fighter's maximum, as it does for the town guards.
+    private static void ShowHp(HPComponent component, int hp, int maxHp)
     {
-        if (component == null || hp <= 0 || component.Hp == hp)
+        if (component == null || hp <= 0)
             return;
-        component.SetCustomHpValue(hp, overrideMaxHpValue: false);
+        if (maxHp > 0 && component.MaxHpValue != maxHp)
+        {
+            component.SetCustomHpValue(maxHp);
+            component.SetCustomHpValue(hp, overrideMaxHpValue: false);
+        }
+        else if (component.Hp != hp)
+            component.SetCustomHpValue(hp, overrideMaxHpValue: false);
+        else
+            return;
         if (component.wasDamagedAtLeastOnce || hp >= component.MaxHpValue)
             return;
         component.wasDamagedAtLeastOnce = true;
