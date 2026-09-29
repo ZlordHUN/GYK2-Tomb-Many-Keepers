@@ -30,7 +30,7 @@ internal static class FightMotion
     {
         internal Vector3 from, to;
         internal float since, direction;
-        internal int state;
+        internal int state, shown = -1;
     }
 
     private static readonly Dictionary<Guid, Track> tracks = new Dictionary<Guid, Track>();
@@ -42,7 +42,7 @@ internal static class FightMotion
     [HarmonyPatch(typeof(FightingGameController), "Update")]
     private static void Update(FightingGameController __instance)
     {
-        if (__instance.CurrentFightState != FightState.ActiveFight)
+        if (__instance.CurrentFightState == FightState.Disabled)
             return;
         if (CoopSession.IsHosting)
             Send(__instance);
@@ -54,15 +54,22 @@ internal static class FightMotion
     [HarmonyPatch(typeof(FightingGameController), nameof(FightingGameController.Stop))]
     private static void Stopped() => tracks.Clear();
 
+    // From preparing to the end, a joined player's fighters, allies too, only follow the host.
+    [HarmonyPrefix]
+    [HarmonyPatch(typeof(FightingAgent), nameof(FightingAgent.CustomUpdate))]
+    private static bool HostRunsFighters() =>
+        !CoopSession.IsGuest || LazySingleton<FightingGameController>.Instance.CurrentFightState == FightState.Disabled;
+
     private static void Send(FightingGameController controller)
     {
         if (!WorldSync.Sharing || Time.unscaledTime < nextSend)
             return;
         nextSend = Time.unscaledTime + Interval;
         snapshot.Clear();
-        foreach (var entity in controller.TargetsDatabase.GetTargetsByTeam(LazyConsts.Fighting.TeamType.WildZombie))
+        foreach (var agent in UnityEngine.Object.FindObjectsByType<FightingAgent>(FindObjectsSortMode.None))
         {
-            if (entity is not Wgo wgo || wgo.Data == null)
+            var wgo = agent.Wgo;
+            if (wgo == null || wgo.Data == null)
                 continue;
             var animation = wgo.MainWgoPart?.AnimationComponent;
             var animator = animation?.Animator;
@@ -94,7 +101,7 @@ internal static class FightMotion
     {
         float progress = reader.ReadSingle(), normalized = reader.ReadSingle();
         var controller = LazySingleton<FightingGameController>.Instance;
-        if (controller.CurrentFightState != FightState.ActiveFight)
+        if (controller.CurrentFightState == FightState.Disabled)
             return;
         int count = reader.ReadInt32();
         for (int i = 0; i < count; i++)
@@ -137,8 +144,12 @@ internal static class FightMotion
             var animation = wgo.MainWgoPart?.AnimationComponent;
             if (animation == null)
                 continue;
-            if ((int)animation.GetState() != track.state)
+            // Only when the host's changes: an attack that ends here goes back to idle by itself.
+            if (track.shown != track.state)
+            {
                 animation.SetState((AnimationState)track.state);
+                track.shown = track.state;
+            }
             animation.Animator?.SetFloat(AnimationComponentBase.idDirectionAnimator, track.direction);
         }
     }
