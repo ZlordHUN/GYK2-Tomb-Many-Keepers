@@ -17,7 +17,6 @@ internal static class FightMotion
 {
     private const float Interval = 0.1f;
     private const float SnapDistance = 4f;
-    private const float Moving = 0.02f;
 
     private static readonly AccessTools.FieldRef<FightingGameController, FightingLevelPresetProcessor> Processor =
         AccessTools.FieldRefAccess<FightingGameController, FightingLevelPresetProcessor>("presetProcessor");
@@ -26,8 +25,17 @@ internal static class FightMotion
     private static readonly FieldInfo ProgressChanged =
         AccessTools.Field(typeof(FightingLevelPresetProcessor), nameof(FightingLevelPresetProcessor.OnProgressChanged));
 
-    private static readonly Dictionary<Guid, Vector3> targets = new Dictionary<Guid, Vector3>();
-    private static readonly List<(Guid id, Vector3 position)> snapshot = new List<(Guid, Vector3)>();
+    // Where an enemy was when the host's last position came, where it is going, and how it looks.
+    private sealed class Track
+    {
+        internal Vector3 from, to;
+        internal float since, direction;
+        internal int state;
+    }
+
+    private static readonly Dictionary<Guid, Track> tracks = new Dictionary<Guid, Track>();
+    private static readonly List<(Guid id, Vector3 position, float direction, int state)> snapshot =
+        new List<(Guid, Vector3, float, int)>();
     private static float nextSend;
 
     [HarmonyPostfix]
@@ -44,7 +52,7 @@ internal static class FightMotion
 
     [HarmonyPostfix]
     [HarmonyPatch(typeof(FightingGameController), nameof(FightingGameController.Stop))]
-    private static void Stopped() => targets.Clear();
+    private static void Stopped() => tracks.Clear();
 
     private static void Send(FightingGameController controller)
     {
@@ -53,8 +61,15 @@ internal static class FightMotion
         nextSend = Time.unscaledTime + Interval;
         snapshot.Clear();
         foreach (var entity in controller.TargetsDatabase.GetTargetsByTeam(LazyConsts.Fighting.TeamType.WildZombie))
-            if (entity is Wgo wgo && wgo.Data != null)
-                snapshot.Add((wgo.Data.UniqueId.Guid, wgo.Data.Position));
+        {
+            if (entity is not Wgo wgo || wgo.Data == null)
+                continue;
+            var animation = wgo.MainWgoPart?.AnimationComponent;
+            var animator = animation?.Animator;
+            float direction = animator != null ? animator.GetFloat(AnimationComponentBase.idDirectionAnimator) : 0f;
+            int state = animation != null ? (int)animation.GetState() : (int)AnimationState.Idle;
+            snapshot.Add((wgo.Data.UniqueId.Guid, wgo.Data.Position, direction, state));
+        }
         var processor = Processor(controller);
         float progress = processor.CurrentProgress, normalized = processor.ProgressNormalized;
         var enemies = snapshot.ToArray();
@@ -63,12 +78,14 @@ internal static class FightMotion
             writer.Write(progress);
             writer.Write(normalized);
             writer.Write(enemies.Length);
-            foreach (var (id, position) in enemies)
+            foreach (var (id, position, direction, state) in enemies)
             {
                 WorldSync.WriteId(writer, id);
                 writer.Write(position.x);
                 writer.Write(position.y);
                 writer.Write(position.z);
+                writer.Write(direction);
+                writer.Write((short)state);
             }
         });
     }
@@ -81,7 +98,21 @@ internal static class FightMotion
             return;
         int count = reader.ReadInt32();
         for (int i = 0; i < count; i++)
-            targets[WorldSync.ReadId(reader)] = new Vector3(reader.ReadSingle(), reader.ReadSingle(), reader.ReadSingle());
+        {
+            var id = WorldSync.ReadId(reader);
+            var position = new Vector3(reader.ReadSingle(), reader.ReadSingle(), reader.ReadSingle());
+            float direction = reader.ReadSingle();
+            int state = reader.ReadInt16();
+            if (!tracks.TryGetValue(id, out var track))
+                tracks[id] = track = new Track { to = position };
+            // The next leg starts where the enemy is shown now, so it never jumps back.
+            var wgo = GameScene.GetWgoViewGlobal(new SGuid(id));
+            track.from = wgo != null && wgo.Data != null ? wgo.Data.Position : track.to;
+            track.to = position;
+            track.since = Time.unscaledTime;
+            track.direction = direction;
+            track.state = state;
+        }
         // The timer reads the progress; the bar waits for the event.
         var processor = Processor(controller);
         SetProgress?.Invoke(processor, new object[] { progress });
@@ -90,27 +121,25 @@ internal static class FightMotion
 
     private static void Glide()
     {
-        float blend = 1f - Mathf.Exp(-12f * Time.deltaTime);
-        foreach (var pair in targets)
+        foreach (var pair in tracks)
         {
             var wgo = GameScene.GetWgoViewGlobal(new SGuid(pair.Key));
             if (wgo == null || wgo.Data == null || !FightingTargetsDatabase.IsCombatEntityAlive(wgo))
                 continue;
-            var current = wgo.Data.Position;
-            var step = pair.Value - current;
-            var next = step.sqrMagnitude > SnapDistance * SnapDistance ? pair.Value : Vector3.Lerp(current, pair.Value, blend);
+            var track = pair.Value;
+            // An even walk over one send interval; a long way off is a teleport, not a walk.
+            float t = Mathf.Clamp01((Time.unscaledTime - track.since) / Interval);
+            var next = (track.to - track.from).sqrMagnitude > SnapDistance * SnapDistance
+                ? track.to
+                : Vector3.Lerp(track.from, track.to, t);
             WorldSync.Apply(() => wgo.Data.Position = next);
             wgo.transform.position = next;
             var animation = wgo.MainWgoPart?.AnimationComponent;
             if (animation == null)
                 continue;
-            if (step.sqrMagnitude > Moving * Moving)
-            {
-                animation.SetState(AnimationState.Walk);
-                animation.SetDirection(new Vector2(step.x, step.z));
-            }
-            else
-                animation.SetState(AnimationState.Idle);
+            if ((int)animation.GetState() != track.state)
+                animation.SetState((AnimationState)track.state);
+            animation.Animator?.SetFloat(AnimationComponentBase.idDirectionAnimator, track.direction);
         }
     }
 }
