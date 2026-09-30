@@ -27,7 +27,11 @@ internal static class SharedPresentation
         Effect,
         Lighting,
         LightOverride,
-        Screen
+        Screen,
+        TalkSkip,
+        TalkShown,
+        AnswerPoint,
+        AnswerPick
     }
 
     private static readonly MemoryStream Packet = new MemoryStream();
@@ -98,10 +102,18 @@ internal static class SharedPresentation
             case Cue.TalkEnd:
                 SharedSpeech.End(slot, reader);
                 break;
+            case Cue.TalkSkip:
+                SharedSpeech.Skip(slot, reader);
+                break;
+            case Cue.TalkShown:
+                SharedSpeech.Complete(slot, reader);
+                break;
             case Cue.Answers:
             case Cue.AnswerHover:
             case Cue.AnswerChosen:
             case Cue.AnswersClosed:
+            case Cue.AnswerPoint:
+            case Cue.AnswerPick:
                 SharedAnswers.Apply(slot, cue, reader);
                 break;
             case Cue.Wisp:
@@ -134,6 +146,21 @@ internal static class SharedPresentation
         }
     }
 
+    // This game's own story, moved on by another player's cue: what it shows next is shared as ever.
+    internal static void Unmirrored(Action act)
+    {
+        bool was = Applying;
+        Applying = false;
+        try
+        {
+            act();
+        }
+        finally
+        {
+            Applying = was;
+        }
+    }
+
     // A player who leaves takes what they were showing with them.
     internal static void Forget(int slot) => Mirror(() =>
     {
@@ -150,5 +177,7 @@ internal static class SharedPresentation
             Forget(slot);
         RemoteWisps.Reset();
         WatchedCutscene.Reset();
+        DialogueTurns.Reset();
+        SceneLighting.Clear();
     }
 }

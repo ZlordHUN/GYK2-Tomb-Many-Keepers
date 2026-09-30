@@ -52,6 +52,8 @@ internal static class WorldClock
         {
             writer.Write(engine.Data.Day);
             writer.Write(EngineTime(engine));
+            // The day's own time, which a paused clock may show otherwise, as a cutscene's lighting does.
+            writer.Write(engine.Data.TimeOfDay);
             writer.Write(engine.IsPaused);
             writer.Write(currentPace);
             writer.Write(weather);
@@ -59,10 +61,14 @@ internal static class WorldClock
         CoopSession.ShareClock(packet.ToArray());
     }
 
+    // The host's next update goes out at once: a cheat changed the day, its time or the weather.
+    internal static void ShareNow() => nextShare = 0f;
+
     internal static void Apply(BinaryReader reader)
     {
         int day = reader.ReadInt32();
         time = reader.ReadSingle();
+        float dayTime = reader.ReadSingle();
         paused = reader.ReadBoolean();
         pace = reader.ReadSingle();
         string weather = reader.ReadString();
@@ -77,6 +83,8 @@ internal static class WorldClock
         if (paused)
         {
             engine.SetTimeOfDayFake(time);
+            // The host's day moves on only by its own hand while its clock stands, as a cheat's /time does.
+            data.SetTimeOfDay(dayTime);
         }
         else
         {

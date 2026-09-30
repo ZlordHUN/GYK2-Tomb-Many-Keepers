@@ -32,6 +32,8 @@ internal sealed class ModSetting
     private readonly object[] choices;
 
     internal string Section => entry.Definition.Section;
+    // A key or key shortcut, as mods bind their keys, which the window shows among the mod's controls.
+    internal bool IsKey => entry.SettingType == typeof(KeyboardShortcut) || entry.SettingType == typeof(UnityEngine.KeyCode);
     internal string Name { get; }
     internal Kinds Kind { get; }
     internal string[] Labels { get; }

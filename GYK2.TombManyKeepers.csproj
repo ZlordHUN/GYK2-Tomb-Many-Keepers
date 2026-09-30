@@ -13,7 +13,7 @@
     <Compile Include="src/**/*.cs" Exclude="src/**/bin/**;src/**/obj/**" />
     <EmbeddedResource Include="assets/MainMenu/WideBackground.png" LogicalName="GYK2.TombManyKeepers.WideBackground.png" />
     <EmbeddedResource Include="assets/MainMenu/ModTitle.png" LogicalName="GYK2.TombManyKeepers.ModTitle.png" />
-    <Reference Include="AstarPathfindingProject;com.rlabrecque.steamworks.net;Sirenix.Serialization;Sirenix.Serialization.Config;Unity.TextMeshPro;UnityEngine.UI;UnityEngine.InputLegacyModule;UnityEngine.PhysicsModule;UnityEngine.AnimationModule;UnityEngine.ImageConversionModule;UnityEngine.ParticleSystemModule;UnityEngine.UIModule;UnityEngine.TextRenderingModule;UnityEngine.TextCoreFontEngineModule;Unity.Addressables;Unity.ResourceManager;Cinemachine;DOTween">
+    <Reference Include="AstarPathfindingProject;com.rlabrecque.steamworks.net;Sirenix.Serialization;Sirenix.Serialization.Config;Unity.TextMeshPro;UnityEngine.UI;UnityEngine.InputLegacyModule;UnityEngine.PhysicsModule;UnityEngine.AnimationModule;UnityEngine.ImageConversionModule;UnityEngine.ParticleSystemModule;UnityEngine.UIModule;UnityEngine.TextRenderingModule;UnityEngine.TextCoreFontEngineModule;Unity.Addressables;Unity.ResourceManager;Cinemachine;DOTween;NodeCanvas;ParadoxNotion">
       <HintPath>$(ManagedDir)/%(Identity).dll</HintPath>
       <Private>false</Private>
     </Reference>

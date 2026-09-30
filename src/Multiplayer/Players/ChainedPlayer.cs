@@ -5,26 +5,39 @@ using UnityEngine;
 
 namespace GYK2.TombManyKeepers.Multiplayer.Players;
 
-// A joined player's keeper waits chained in its bay until the host frees it. It holds the
-// keeper's control meanwhile; the pause key still works, and once the host cuts a shackle
-// the interaction key struggles against the last one.
+// A joined player's keeper waits chained in its bay until the host frees it. As the native opening does
+// for the host's keeper, the chains lock only its movement: the player keeps the game's controls, and once
+// the host cuts a shackle the game's own prompt offers the struggle against the last one. Each chain
+// motion holds the keeper, as the opening's own struggles do.
 internal sealed class ChainedPlayer : MonoBehaviour
 {
+    // A struggle the host never answers gives the keeper back.
+    private const float AnswerTime = 3f;
     // Collisions the freed keeper skips until it has walked off the prop it stood in.
     private readonly List<(Collider keeper, Collider prop)> steppingOff = new List<(Collider, Collider)>();
     private KeeperChains chains;
+    private KeeperStruggleTarget lastShackle;
     private Transform overlay;
     private Vector3 anchor;
-    private bool hinted;
+    private Vector3 bay;
+    private float askedAt = -1f;
+    private bool offered;
+    private bool holding;
     private bool released;
 
     internal static void Attach(KeeperChains chains, Vector3 anchor)
     {
+        var controller = MainGame.PlayerController;
         var player = chains.gameObject.AddComponent<ChainedPlayer>();
         player.chains = chains;
         player.anchor = anchor;
-        player.overlay = MainGame.PlayerController.View.PlayerAnimation.Animator.transform.Find("gfx/bdy_over");
-        MainGame.PlayerController.SetControlTakenType(TakenControlType.ByFlow, isEnabled: false);
+        player.bay = controller.PhysicalBody.transform.position;
+        player.overlay = controller.View.PlayerAnimation.Animator.transform.Find("gfx/bdy_over");
+        // The native opening's chained keeper faces no way, so its interaction finds the chain before it
+        // whichever way this player last walked; a locked keeper keeps its facing until it moves again.
+        controller.PlayerData.Direction = Vector2.zero;
+        controller.OnControlStateChanged += player.HoldStill;
+        controller.PhysicalBody.LockMovement(true);
     }
 
     private void Update()
@@ -36,24 +49,49 @@ internal sealed class ChainedPlayer : MonoBehaviour
             Release();
             return;
         }
-        // Windows and scene changes take control for themselves.
-        if (!MainGame.PlayerController.IsControlsEnabledExcept(TakenControlType.ByFlow))
-            return;
-        if (LazyInput.GetKeyDown(GameKey.InGameMenu))
+        if (chains.RemainingShackles == 1 && !offered)
         {
-            LazyUI.GetWindow<UIGamePauseWindow>().Open(null);
-            return;
+            offered = true;
+            lastShackle = KeeperStruggleTarget.Create(transform, bay, Struggle);
         }
-        if (chains.RemainingShackles != 1 || chains.IsBusy)
+        else if (chains.RemainingShackles != 1 && lastShackle != null)
+            Retire();
+        // The host's answer starts the motion this struggle waits for.
+        if (chains.IsBusy || Time.unscaledTime > askedAt + AnswerTime)
+            askedAt = -1f;
+        Hold(chains.IsBusy || askedAt >= 0f);
+    }
+
+    private void Struggle()
+    {
+        if (chains.RemainingShackles != 1 || chains.IsBusy || askedAt >= 0f)
             return;
-        if (!hinted)
-        {
-            hinted = true;
-            LazySingleton<UINotificator>.Instance.ShowSimpleTextNotification(
-                ControllerIconLibrary.GetIconId(GameKey.Interaction) + "Struggle against the last shackle");
-        }
-        if (LazyInput.GetKeyDown(GameKey.Interaction))
-            CoopSession.RequestStruggle();
+        askedAt = Time.unscaledTime;
+        Hold(true);
+        CoopSession.RequestStruggle();
+    }
+
+    private void Hold(bool hold)
+    {
+        if (hold == holding)
+            return;
+        holding = hold;
+        MainGame.PlayerController.SetControlTakenType(TakenControlType.ByFlow, isEnabled: !hold);
+    }
+
+    // Returned control makes the keeper's body dynamic again; the chains keep it kinematic, as a bay's
+    // prop would push a dynamic keeper out of where it stands.
+    private void HoldStill()
+    {
+        var body = MainGame.PlayerController.PhysicalBody;
+        if (!body.Rb.isKinematic && body.gameObject.activeInHierarchy)
+            body.LockMovement(true);
+    }
+
+    private void Retire()
+    {
+        lastShackle.Retire();
+        lastShackle = null;
     }
 
     // A bay can hold a native prop where the keeper stands, such as a chain pile. The chained keeper
@@ -61,7 +99,10 @@ internal sealed class ChainedPlayer : MonoBehaviour
     private void Release()
     {
         released = true;
+        if (lastShackle != null)
+            Retire();
         var controller = MainGame.PlayerController;
+        controller.OnControlStateChanged -= HoldStill;
         foreach (var keeper in controller.PhysicalBody.GetComponentsInChildren<Collider>())
         {
             if (!keeper.enabled || keeper.isTrigger)
@@ -77,7 +118,8 @@ internal sealed class ChainedPlayer : MonoBehaviour
                 steppingOff.Add((keeper, prop));
             }
         }
-        controller.SetControlTakenType(TakenControlType.ByFlow, isEnabled: true);
+        Hold(false);
+        controller.PhysicalBody.LockMovement(false);
         if (steppingOff.Count == 0)
             Destroy(this);
     }
@@ -118,7 +160,14 @@ internal sealed class ChainedPlayer : MonoBehaviour
             if (keeper != null && prop != null)
                 Physics.IgnoreCollision(keeper, prop, false);
         }
-        if (!released && MainGame.Instance != null && MainGame.PlayerController != null)
-            MainGame.PlayerController.SetControlTakenType(TakenControlType.ByFlow, isEnabled: true);
+        if (released || MainGame.Instance == null || MainGame.PlayerController == null)
+            return;
+        var controller = MainGame.PlayerController;
+        controller.OnControlStateChanged -= HoldStill;
+        if (holding)
+            controller.SetControlTakenType(TakenControlType.ByFlow, isEnabled: true);
+        // Leaving for the menu has already unlocked the keeper, whose body is put away.
+        if (controller.PhysicalBody.gameObject.activeInHierarchy)
+            controller.PhysicalBody.LockMovement(false);
     }
 }

@@ -1,3 +1,4 @@
+using System.Collections.Generic;
 using System.IO;
 using GYK2.TombManyKeepers.Multiplayer.Players;
 using GYK2.TombManyKeepers.Network.Session;
@@ -13,6 +14,22 @@ namespace GYK2.TombManyKeepers.Multiplayer.Presentation;
 internal static class SceneLighting
 {
     private static bool weather;
+    // The preset each scene was last lit with, in this game or another player's.
+    private static readonly Dictionary<string, string> presets = new Dictionary<string, string>();
+    // A scene whose next preset here is this game's guess, which it keeps to itself.
+    private static string guessed;
+
+    // The preset a scene was last lit with, if any game said.
+    internal static string PresetOf(string scene) => scene != null && presets.TryGetValue(scene, out string preset) ? preset : null;
+
+    // This game lights a scene it has no word of, and shows its own guess to no one.
+    internal static void Guess(string scene) => guessed = scene;
+
+    internal static void Clear()
+    {
+        presets.Clear();
+        guessed = null;
+    }
     // The player whose override lights this game; theirs resets it wherever this player has gone.
     private static int overriddenBy;
 
@@ -29,6 +46,12 @@ internal static class SceneLighting
         if (SharedPresentation.Applying || !KeeperSpawn.Active || !CoopSession.SharesWorld || string.IsNullOrEmpty(presetName))
             return;
         string scene = MainGame.PlayerData.currentGameSceneId ?? string.Empty;
+        if (scene == guessed)
+        {
+            guessed = null;
+            return;
+        }
+        presets[scene] = presetName;
         SharedPresentation.Send(SharedPresentation.Cue.Lighting, writer =>
         {
             writer.Write(scene);
@@ -72,6 +95,7 @@ internal static class SceneLighting
         bool here = scene == MainGame.PlayerData.currentGameSceneId;
         if (cue == SharedPresentation.Cue.Lighting)
         {
+            presets[scene] = preset;
             if (here)
                 EnvironmentEngine.Instance.SetTimeOfDayPreset(preset);
             return;

@@ -11,7 +11,8 @@ namespace GYK2.TombManyKeepers.Network.Discovery;
 // Online games, listed as Steam lobbies. A host's lobby only describes its game, with the build of the mod it runs
 // and the version of the game, as its LAN answers do: nobody else joins the lobby, so it ends with the host's game,
 // and players reach the host through Steam's network by the host's account. A public or password game's lobby is
-// public and every search finds it; a friends' game's is for the host's Steam friends; a private game has none. The
+// public and every search finds it; a friends' game's is for the host's Steam friends; a private game has none, nor
+// does a game its host keeps to the local network. The
 // description never holds the password or the lobby's key. A search asks for lobbies of this session protocol
 // worldwide, and each game's ping is estimated from where its host said it stands on Steam's relay network.
 internal sealed class SteamLobbies : IDisposable

@@ -15,6 +15,7 @@ internal sealed class RemoteKeeper : MonoBehaviour
     private static readonly RemoteKeeper[] Keepers = new RemoteKeeper[CoopSession.MaxPlayers + 1];
     private static readonly int[] reportedShackles = new int[CoopSession.MaxPlayers + 1];
     private static readonly string[] reportedScenes = new string[CoopSession.MaxPlayers + 1];
+    private static readonly Vector3[] reportedPositions = new Vector3[CoopSession.MaxPlayers + 1];
     // Keepers recreated after their prison scene unloads live outside game scenes, like the primary.
     private static GameObject wanderers;
 
@@ -35,6 +36,9 @@ internal sealed class RemoteKeeper : MonoBehaviour
 
     // The scene another player's keeper was last reported in.
     internal static string SceneOf(int slot) => reportedScenes[slot];
+
+    // Where in that scene.
+    internal static Vector3? PositionOf(int slot) => reportedScenes[slot] != null ? reportedPositions[slot] : (Vector3?)null;
 
     // Where another player's keeper shows speech and answers, while it is shown here.
     internal static Transform BubblePoint(int slot)
@@ -90,6 +94,7 @@ internal sealed class RemoteKeeper : MonoBehaviour
         string scene = reader.ReadString();
         reportedShackles[slot] = shackles;
         reportedScenes[slot] = scene;
+        reportedPositions[slot] = position;
         if (!KeeperSpawn.Active)
             return;
         var keeper = Find(slot);

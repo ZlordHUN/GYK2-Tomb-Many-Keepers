@@ -12,8 +12,9 @@ namespace GYK2.TombManyKeepers.UI.Mods;
 
 // The settings of the mod picked in the Mods window, beside the list: the mod's name on a header plate, then its
 // settings as the game's own option rows under the names of their sections, in a copy of the save list's own scroll
-// view; below them, what the setting under the pointer or at a gamepad's focus is for, and its default. A mod without
-// settings says so in the pane's middle.
+// view, and last its controls: the keys its settings hold, changed in their rows as the others are, and the keys it
+// handles that no setting holds, shown as they are. Below them, what the row under the pointer or at a gamepad's
+// focus is for, and a setting's default. A mod without settings or controls says so in the pane's middle.
 internal sealed class ModSettingsPane
 {
     // The room between the plate and the rows, and the description's height below them: three lines and their margins.
@@ -78,7 +79,7 @@ internal sealed class ModSettingsPane
         notice.rectTransform.anchorMin = Vector2.zero;
         notice.rectTransform.anchorMax = Vector2.one;
         notice.rectTransform.offsetMin = notice.rectTransform.offsetMax = Vector2.zero;
-        notice.text = "This mod has no settings.";
+        notice.text = "This mod has no settings or controls.";
     }
 
     // The rows a gamepad reaches, first to last.
@@ -100,8 +101,9 @@ internal sealed class ModSettingsPane
         slidValues.Clear();
         Describe(null);
         var settings = ModSetting.Of(plugin);
+        var controls = ModControls.Of(plugin);
         string shownSection = null;
-        foreach (var setting in settings)
+        foreach (var setting in settings.Where(setting => !setting.IsKey))
         {
             if (setting.Section != shownSection)
             {
@@ -110,15 +112,22 @@ internal sealed class ModSettingsPane
             }
             Add(setting);
         }
-        notice.gameObject.SetActive(settings.Count == 0);
+        if (settings.Any(setting => setting.IsKey) || controls.Count > 0)
+        {
+            Heading("Controls");
+            foreach (var setting in settings.Where(setting => setting.IsKey))
+                Add(setting);
+            foreach (var control in controls)
+                Add(control);
+        }
+        notice.gameObject.SetActive(settings.Count == 0 && controls.Count == 0);
         DrawnRows.Centre(shown, row => slidValues.TryGetValue(row, out var values) ? values : Array.Empty<string>());
         LayoutRebuilder.ForceRebuildLayoutImmediate(rows);
         scroll.verticalNormalizedPosition = 1f;
     }
 
-    // Shows what a setting is for, or nothing.
-    internal void Describe(ModSetting setting) =>
-        description.text = setting == null ? string.Empty : NativeWindow.Literal(setting.Description);
+    // Shows what a row is for, or nothing.
+    internal void Describe(string about) => description.text = about == null ? string.Empty : NativeWindow.Literal(about);
 
     private void Heading(string text)
     {
@@ -170,12 +179,27 @@ internal sealed class ModSettingsPane
                 item = field.GetComponent<GamepadNavigationItem>();
                 break;
         }
+        Take(row, item, setting.Description);
+    }
+
+    // A key the mod handles with no setting of its own, shown as its settings' rows show a value that cannot change.
+    private void Add(ModControls.Control control)
+    {
+        var field = NativeWindow.TextRow(switched, typed, rows, control.Name, string.Empty, 0);
+        field.SetTextWithoutNotify(control.Keys);
+        field.interactable = false;
+        Take(field.transform.parent.gameObject, field.GetComponent<GamepadNavigationItem>(), control.Description);
+    }
+
+    // A row fitted to its name, reached by a gamepad, and described under the pointer or at the gamepad's focus.
+    private void Take(GameObject row, GamepadNavigationItem item, string about)
+    {
         Fit((RectTransform)row.transform);
         shown.Add((RectTransform)row.transform);
         item.group = group;
-        item.OnFocus.AddListener(() => Describe(setting));
+        item.OnFocus.AddListener(() => Describe(about));
         var pointed = row.AddComponent<Pointed>();
-        pointed.Entered = () => Describe(setting);
+        pointed.Entered = () => Describe(about);
         pointed.Left = () => Describe(null);
         items.Add(item);
     }

@@ -7,7 +7,8 @@ namespace GYK2.TombManyKeepers;
 // The mod's own settings, shown in its Mods window: whether its widescreen support, multiplayer and manual saves load.
 // Each is on unless the player turns it off, and is switched as the game starts: a feature that is off has none of its
 // patches applied, so it runs nothing and changes nothing, and the files and saves it made stay as they are for when
-// it is on again. A feature is the code under its own folders.
+// it is on again. A feature is the code under its own folders. Beside them, whether this player can use cheats, which
+// takes effect at once.
 internal static class FeatureSwitches
 {
     private const string Section = "Features";
@@ -23,10 +24,16 @@ internal static class FeatureSwitches
         ("GYK2.TombManyKeepers.UI.Saves", () => ManualSaves)
     };
 
+    private static ConfigEntry<bool> cheats;
+
     // Whether each feature loaded as the game started; changing its setting takes effect the next time.
     internal static bool Widescreen { get; private set; } = true;
     internal static bool Multiplayer { get; private set; } = true;
     internal static bool ManualSaves { get; private set; } = true;
+
+    // Whether this player can use the chat's cheat commands, in any game, and turn cheats on for a game they host. Off,
+    // the host's settings have no Cheats setting, and a game this player hosts has cheats off for everyone.
+    internal static bool Cheats => cheats == null || cheats.Value;
 
     internal static void Bind(ConfigFile config)
     {
@@ -36,6 +43,9 @@ internal static class FeatureSwitches
             "The Multiplayer menu: hosting, joining and playing together." + Restart).Value;
         ManualSaves = config.Bind(Section, "Manual saves", true,
             "Save Game and Load Game in the pause menu." + Restart).Value;
+        cheats = config.Bind(Section, "Cheats", true,
+            "The chat's cheat commands and the Cheats setting when hosting. Off, you cannot use cheats in any game. " +
+            "Takes effect at once.");
     }
 
     // The features that are off, by name.
