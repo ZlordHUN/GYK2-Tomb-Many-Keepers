@@ -80,6 +80,8 @@ internal sealed class ModSettingsPane
         notice.rectTransform.anchorMax = Vector2.one;
         notice.rectTransform.offsetMin = notice.rectTransform.offsetMax = Vector2.zero;
         notice.text = "This mod has no settings or controls.";
+        // The wheel scrolls the rows from anywhere over the pane, not only over a row's text.
+        pane.gameObject.AddComponent<WheelArea>().Scroll = scroll;
     }
 
     // The rows a gamepad reaches, first to last.
@@ -239,6 +241,21 @@ internal sealed class ModSettingsPane
         line.overflowMode = TextOverflowModes.Ellipsis;
         NativeWindow.SetText(line, string.Empty);
         return line;
+    }
+
+    // The whole pane under its rows, plate and description, drawing nothing: it takes the pointer where nothing of the
+    // pane does, between and beside the rows too, and gives the wheel to the rows' scroll view.
+    private sealed class WheelArea : Graphic, IScrollHandler
+    {
+        internal ScrollRect Scroll;
+
+        protected override void OnPopulateMesh(VertexHelper mesh) => mesh.Clear();
+
+        public void OnScroll(PointerEventData eventData)
+        {
+            if (Scroll != null)
+                ExecuteEvents.Execute(Scroll.gameObject, eventData, ExecuteEvents.scrollHandler);
+        }
     }
 
     // Tells the pane when the pointer comes over a row and leaves it, and nothing else, so the scroll view still

@@ -30,7 +30,8 @@ internal sealed class HostSettings
     }
 
     internal static readonly string[] Reaches = { "Online", "LAN Only" };
-    internal const int FewestPlayers = 2;
+    // A game may be for its host alone, which no one else joins.
+    internal const int FewestPlayers = 1;
     private const string Extension = ".tmkhost";
     // The file's format; the first had no password, the second no network.
     private const byte Format = 3, PasswordFormat = 2, FirstFormat = 1;
@@ -128,6 +129,9 @@ internal sealed class HostSettings
             Debug.LogWarning("[Multiplayer] Could not remove the campaign's host settings: " + exception.Message);
         }
     }
+
+    // A campaign ever hosted keeps its host settings beside its save, written with every save made while hosting.
+    internal static bool IsHosted(SaveSlotData slot) => slot != null && File.Exists(PathOf(slot));
 
     private static string PathOf(SaveSlotData slot) => SaveSystem.SaveFolder + slot.slotName + Extension;
 }

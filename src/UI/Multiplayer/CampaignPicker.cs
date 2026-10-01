@@ -13,6 +13,8 @@ namespace GYK2.TombManyKeepers.UI.Multiplayer;
 internal static class CampaignPicker
 {
     private const string Header = "Host Game";
+    // Room between the list's view and the Next row.
+    private const int NextGap = 6;
     private static readonly Color PickColor = new Color(1f, 0.82f, 0.35f);
     private static UIMainMenuWindow menu;
     private static bool picking;
@@ -23,6 +25,9 @@ internal static class CampaignPicker
     private static RectTransform splitter;
     private static Vector2 splitterAnchorMin, splitterAnchorMax, splitterPosition;
     private static float splitterFromTop;
+
+    // The Host Game list is open.
+    internal static bool Picking => picking;
 
     // Opens the list; returning from the settings, the campaign picked before stays picked.
     internal static void Open(UIMainMenuWindow mainMenu, bool keepPick = false)
@@ -61,8 +66,21 @@ internal static class CampaignPicker
             next = AddNext(__instance);
         next.transform.parent.gameObject.SetActive(true);
         PlaceSplitter(true);
+        PlaceNext(__instance);
         Light(__instance);
         ((RectTransform)__instance.transform).RefreshContentFitter();
+    }
+
+    // The list's view reaches below the block the window's layout gives it, so a Next row placed right under that
+    // block stood over the last save shown; the row starts below the view, and the window grows by as much.
+    private static void PlaceNext(UISaveSlotsWindow window)
+    {
+        var content = (RectTransform)window.transform.Find("GenericWIndowLayout/Content");
+        var view = content == null ? null : (RectTransform)content.Find("Scroll");
+        if (view == null)
+            return;
+        float below = content.rect.yMin - content.InverseTransformPoint(view.TransformPoint(view.rect.min)).y;
+        next.transform.parent.GetComponent<HorizontalLayoutGroup>().padding.top = Mathf.CeilToInt(Mathf.Max(0f, below)) + NextGap;
     }
 
     private static UIDialogWindowButton AddNext(UISaveSlotsWindow window)

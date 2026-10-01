@@ -8,7 +8,8 @@ using UnityEngine;
 
 namespace GYK2.TombManyKeepers.Multiplayer.Presentation;
 
-// The sounds and world effects of a player's cutscene play for the players watching it.
+// The world effects of a player's cutscene show for everyone in its scene, and its sounds play for the players taking
+// part in it.
 [HarmonyPatch]
 internal static class CutsceneSounds
 {
@@ -32,7 +33,7 @@ internal static class CutsceneSounds
         {
             string id = reader.ReadString();
             bool stop = reader.ReadBoolean();
-            if (!SharedPresentation.Watches(slot) || id.Length == 0)
+            if (!WatchedCutscene.Watching(slot) || id.Length == 0)
                 return;
             if (stop)
                 LazyAudio.Stop(id);

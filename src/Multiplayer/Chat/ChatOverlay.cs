@@ -552,8 +552,8 @@ internal sealed class ChatOverlay : MonoBehaviour
         CoopSession.Current != null && KeeperSpawn.Active && MainGame.Instance.gameState == MainGame.GameState.InGame &&
         MainGame.PlayerController != null && !LazyUI.Get<UILoadingOverlay>().IsShown;
 
-    // Another of the game's or the mod's text fields has the keyboard.
-    private static bool Typing()
+    // A text field has the keyboard: this chat's, or another of the game's or the mod's.
+    internal static bool Typing()
     {
         var selected = EventSystem.current != null ? EventSystem.current.currentSelectedGameObject : null;
         return selected != null && selected.TryGetComponent<TMP_InputField>(out var other) && other.isFocused;

@@ -36,7 +36,7 @@ internal static class WorldSnapshot
     // the host is still chained, or arrives beside the host; a returning player resumes exactly
     // where they left, still chained if they left chained while the bays are loaded. Players in a
     // new campaign's lobby all wake chained. Either way the keeper has the campaign's standing with
-    // the townsfolk.
+    // the townsfolk and the campaign's values.
     internal static Placement Place(string key, int slot, bool startsChained)
     {
         var record = CharacterRecords.Find(key);
@@ -45,6 +45,7 @@ internal static class WorldSnapshot
             record = CharacterRecords.Create(key, slot);
         record.clientId = slot;
         SharedKnowledge.CopyStanding(record.playerData);
+        CampaignValues.Copy(record.playerData);
         int shackles = startsChained ? 2
             : returning ? KeeperSpawn.BaysOpen ? CharacterRecords.ChainedWhenLeft(key) : 0
             : (KeeperSpawn.BaysOpen || KeeperSpawn.BaysAhead) && RemoteKeeper.LocalShackles() > 0 ? 2 : 0;

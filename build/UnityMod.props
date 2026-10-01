@@ -9,7 +9,7 @@
   <Import Project="$(MSBuildThisFileDirectory)Local.props" Condition="Exists('$(MSBuildThisFileDirectory)Local.props')" />
 
   <PropertyGroup>
-    <GameDir Condition="'$(GameDir)' == ''">$(RepositoryRoot)GYK2</GameDir>
+    <GameDir Condition="'$(GameDir)' == ''">$(RepositoryRoot)Graveyard Keeper 2</GameDir>
     <BepInExDir Condition="'$(BepInExDir)' == ''">$(GameDir)/BepInEx</BepInExDir>
     <ManagedDir>$(GameDir)/GraveyardKeeper2_Data/Managed</ManagedDir>
   </PropertyGroup>

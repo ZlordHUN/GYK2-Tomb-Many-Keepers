@@ -5,6 +5,7 @@ using GYK2.TombManyKeepers.Multiplayer.Chat;
 using GYK2.TombManyKeepers.Multiplayer.Players;
 using GYK2.TombManyKeepers.Network.Session;
 using GYK2.TombManyKeepers.Network.Steam;
+using GYK2.TombManyKeepers.Patches.Saves;
 using HarmonyLib;
 using LazyBearTechnology;
 using TMPro;
@@ -336,7 +337,15 @@ internal sealed class LobbyWindow : LazyWindow<LazyWidgetDataBase>
         if (card != null)
             DestroyImmediate(card);
         var slot = Instantiate(SaveCard(LazyUI.GetWindow<UISaveSlotsWindow>()), layout);
-        slot.Show(world, canDelete: false);
+        SaveKindPatches.Displaying = true;
+        try
+        {
+            slot.Show(world, canDelete: false);
+        }
+        finally
+        {
+            SaveKindPatches.Displaying = false;
+        }
         card = slot.gameObject;
         card.name = "World card";
         // The copy only shows the world: what picks, deletes or imports a save goes.
@@ -351,7 +360,8 @@ internal sealed class LobbyWindow : LazyWindow<LazyWidgetDataBase>
     }
 
     // The lobby's first lines, as GYK1's: the host tells everyone, players arriving later too, that the lobby waits for
-    // them and how it set the game. A player arriving in a running game hears how to join it.
+    // them and how it set the game; a game for the host alone waits for no one. A player arriving in a running game hears
+    // how to join it.
     private static void Greet(CoopSession session)
     {
         var settings = session.Settings;
@@ -359,9 +369,10 @@ internal sealed class LobbyWindow : LazyWindow<LazyWidgetDataBase>
         if (session.IsHost && greeted != session)
         {
             greeted = session;
-            session.Tell("Waiting for players...");
-            session.Tell($"Up to {settings.Players} keepers. {settings.Visibility}, {settings.NetworkShown}, " +
-                $"cheats {(settings.Cheats ? "on" : "off")}.");
+            if (settings.Players > 1)
+                session.Tell("Waiting for players...");
+            string keepers = settings.Players == 1 ? "One keeper" : $"Up to {settings.Players} keepers";
+            session.Tell($"{keepers}. {settings.Visibility}, {settings.NetworkShown}, cheats {(settings.Cheats ? "on" : "off")}.");
         }
         else if (running)
             Notice("The game is in progress. Ready up, then join.");
@@ -557,34 +568,11 @@ internal sealed class LobbyWindow : LazyWindow<LazyWidgetDataBase>
         layout.RefreshContentFitter();
     }
 
-    // The host readies up or stops being ready; readied, it tells everyone whom the game still waits for, as GYK1's host
-    // heard it.
+    // The host readies up or stops being ready, as every player does; the session tells everyone how many are ready.
     private static void ToggleHostReady()
     {
         var session = CoopSession.Current;
-        if (session == null)
-            return;
-        bool readying = !session.IsReady(session.LocalSlot);
-        session.SetReady(readying);
-        if (!readying || session.CanStart)
-            return;
-        var (readied, present) = Readiness(session);
-        session.TellReadiness(readied, present);
-    }
-
-    // How many players present are ready, of how many.
-    private static (int readied, int present) Readiness(CoopSession session)
-    {
-        int present = 0, readied = 0;
-        for (int slot = 1; slot <= CoopSession.MaxPlayers; slot++)
-        {
-            if (session.PlayerName(slot) == null)
-                continue;
-            present++;
-            if (session.IsReady(slot))
-                readied++;
-        }
-        return (readied, present);
+        session?.SetReady(!session.IsReady(session.LocalSlot));
     }
 
     private void Draw(string text, System.Action pressed)

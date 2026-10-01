@@ -31,7 +31,9 @@ internal static class SharedPresentation
         TalkSkip,
         TalkShown,
         AnswerPoint,
-        AnswerPick
+        AnswerPick,
+        Tutorial,
+        TutorialClosed
     }
 
     private static readonly MemoryStream Packet = new MemoryStream();
@@ -128,6 +130,12 @@ internal static class SharedPresentation
             case Cue.LightOverride:
                 SceneLighting.Apply(slot, cue, reader);
                 break;
+            case Cue.Tutorial:
+                SharedTutorials.Arrive(slot, reader);
+                break;
+            case Cue.TutorialClosed:
+                SharedTutorials.Advance(reader);
+                break;
         }
     });
 
@@ -179,5 +187,6 @@ internal static class SharedPresentation
         WatchedCutscene.Reset();
         DialogueTurns.Reset();
         SceneLighting.Clear();
+        SharedTutorials.Clear();
     }
 }

@@ -172,6 +172,9 @@ internal static class StationLeases
         Clear();
     }
 
+    // Joined player: the stations this game's keeper borrowed and uses.
+    internal static IEnumerable<WgoData> Used => uses.Values.Select(use => use.Station);
+
     internal static void Clear()
     {
         lent.Clear();
@@ -279,7 +282,7 @@ internal static class StationLeases
         data.CraftComponent?.CraftableObject != null && data.CraftComponent.HasCraftsByBalance;
 
     // Only the game using a station runs its craft: the host's, unless a joined player has it.
-    private static bool Runs(CraftComponent craft)
+    internal static bool Runs(CraftComponent craft)
     {
         if (craft.CraftableObject is not WgoData data || !CoopSession.SharesWorld)
             return true;
@@ -406,12 +409,19 @@ internal static class StationLeases
     // A station's craft takes on the state of the game that last ran it.
     private static void InstallCraft(WgoData data, byte[] state)
     {
+        if (CopyCraft(data, state))
+            StatusChanged(data.CraftComponent)?.Invoke(data.CraftComponent.Status);
+    }
+
+    // The craft's state alone, which nothing has reacted to yet.
+    internal static bool CopyCraft(WgoData data, byte[] state)
+    {
         var live = data.CraftComponent;
         if (live == null || state == null || state.Length == 0)
-            return;
+            return false;
         var source = Sirenix.Serialization.SerializationUtility.DeserializeValue<CraftComponent>(state, Sirenix.Serialization.DataFormat.Binary);
         if (source == null)
-            return;
+            return false;
         foreach (var field in CraftState)
             field.SetValue(live, field.GetValue(source));
         live.Init(data);
@@ -419,7 +429,7 @@ internal static class StationLeases
             MainGame.Instance.craftSystem.AddCraftObject(live);
         else
             MainGame.Instance.craftSystem.RemoveCraftObject(live);
-        StatusChanged(live)?.Invoke(live.Status);
+        return true;
     }
 
     // Host: applies what a player took and added since the contents were lent, so changes the

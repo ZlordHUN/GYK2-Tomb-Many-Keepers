@@ -14,6 +14,7 @@ using GYK2.TombManyKeepers.Multiplayer.Session;
 using GYK2.TombManyKeepers.Multiplayer.World;
 using GYK2.TombManyKeepers.Network.Discovery;
 using GYK2.TombManyKeepers.Network.Steam;
+using GYK2.TombManyKeepers.Patches.Saves;
 using LazyBearTechnology;
 using Steamworks;
 using UnityEngine;
@@ -158,6 +159,8 @@ internal sealed class CoopSession : MonoBehaviour
     private float holdingSince = -1f;
     private float releasedAt = -1f;
     private string toldReadiness;
+    // A player whose readiness changed unheard while they waited from saying too much.
+    private int unheardReadiness;
     private float nextState;
     private bool hostLoaded;
     private int sharedEntry = -1;
@@ -346,7 +349,7 @@ internal sealed class CoopSession : MonoBehaviour
             session.ShareCharacter(leaving: true);
         }
         Current = null;
-        MainGame.OnGoToMainMenu -= Stop;
+        MainGame.OnGoToMainMenu -= LeftForMenu;
         MainGame.OnGameStarted -= session.HostStarted;
         KeeperSpawn.KeeperAdded -= session.ShareRescue;
         KeeperSpawn.BaysOpened -= session.ShareBays;
@@ -359,6 +362,7 @@ internal sealed class CoopSession : MonoBehaviour
         EntryBarrier.Cancel();
         EntryStatus.End();
         ChatLog.Clear();
+        ChatCooldown.Clear();
         NpcNames.Clear();
         ChatOverlay.Close();
         CharacterRecords.Clear();
@@ -384,6 +388,7 @@ internal sealed class CoopSession : MonoBehaviour
         PersonalGrants.Clear();
         DropClaims.Clear();
         StationLeases.Clear();
+        CraftProgress.Clear();
         RestAgreement.Clear();
     }
 
@@ -503,6 +508,8 @@ internal sealed class CoopSession : MonoBehaviour
         ready[LocalSlot] = isReady;
         Compose(Message.Ready, LocalSlot).Write(isReady);
         Broadcast(true);
+        if (IsHost)
+            TellReadiness(LocalSlot);
     }
 
     // A player in the lobby of a running game asks for the game once ready.
@@ -701,7 +708,14 @@ internal sealed class CoopSession : MonoBehaviour
         transport = new SteamTransport();
         transport.Connected += OnConnected;
         transport.Disconnected += OnDisconnected;
-        MainGame.OnGoToMainMenu += Stop;
+        MainGame.OnGoToMainMenu += LeftForMenu;
+    }
+
+    // Leaving for the main menu ends the session; leaving for a save loading in the game's place does not.
+    private static void LeftForMenu()
+    {
+        if (!InGameLoadPatches.Reloading)
+            Stop();
     }
 
     private void Update()
@@ -718,6 +732,7 @@ internal sealed class CoopSession : MonoBehaviour
             SendWorlds();
             ShareEntry();
             TryRelease();
+            TellUnheardReadiness();
             if (releasedAt >= 0f && Time.unscaledTime - releasedAt > BaysTimeout)
                 ReleasePlayers();
             FreeStranded();
@@ -748,6 +763,9 @@ internal sealed class CoopSession : MonoBehaviour
                 PersonalGrants.Deliver();
             NameTags.Follow();
             ChatOverlay.Follow();
+            SharedTutorials.Update();
+            SharedSpeech.Update();
+            WatchedCutscene.Update();
         }
         if (LocalSlot == 0 || !RemoteKeeper.CanShare || Time.unscaledTime < nextState)
             return;
@@ -764,6 +782,7 @@ internal sealed class CoopSession : MonoBehaviour
         ObjectMotion.Share();
         WorldDrops.Settle();
         WorldClock.Share();
+        CraftProgress.Share();
         WorldSync.Flush();
         WatchedCutscene.Share();
         RemoteWisps.Share();
@@ -893,7 +912,7 @@ internal sealed class CoopSession : MonoBehaviour
         switch (message)
         {
             case Message.Chat:
-                Relay(slot, ChatLog.Clean(reader.ReadString()));
+                SayFor(slot, ChatLog.Clean(reader.ReadString()));
                 return false;
             case Message.NpcLine:
                 // The keeper a line is for is a player's; a character's line has none.
@@ -924,6 +943,8 @@ internal sealed class CoopSession : MonoBehaviour
                 Broadcast(true);
                 if (!introduced[slot])
                     Send(connection, true);
+                if (InLobby)
+                    TellReadiness(slot);
                 return false;
             case Message.JoinGame:
                 if (!InLobby && ready[slot] && !playing[slot] && !awaitingWorld.Contains(connection))
@@ -1331,7 +1352,7 @@ internal sealed class CoopSession : MonoBehaviour
             return;
         if (IsHost)
         {
-            Relay(LocalSlot, text);
+            SayFor(LocalSlot, text);
             return;
         }
         Compose(Message.Chat, LocalSlot).Write(text);
@@ -1346,15 +1367,93 @@ internal sealed class CoopSession : MonoBehaviour
             Relay(0, ChatLog.Clean(text));
     }
 
-    // Host: whom the lobby still waits for, as GYK1's host heard it when it readied up; the count it told last goes
-    // unsaid again.
-    internal void TellReadiness(int readied, int present)
+    // Host, in its lobby with others: as anyone readies up or takes it back, the host or a player, it tells everyone how
+    // many of the players present are ready, as GYK1's lobby counted them: who is no longer ready, or that everyone is
+    // once they all are. The same line is never told twice in a row. A player waiting from saying too much changes
+    // their readiness unheard, and once they may be heard again the lobby hears where it stands.
+    private void TellReadiness(int changed)
     {
-        string text = $"Waiting for players to ready up ({readied}/{present} ready).";
+        if (!IsHost || !InLobby || peers.Count == 0 || names[changed] == null)
+            return;
+        var (readied, present) = Readiness();
+        string text = ready[changed] ? Standing(readied, present) : $"{names[changed]} is no longer ready ({readied}/{present} ready).";
+        if (text == toldReadiness)
+            return;
+        if (ChatCooldown.Remaining(changed) > 0f)
+        {
+            unheardReadiness = changed;
+            return;
+        }
+        toldReadiness = text;
+        Tell(text);
+        if (ChatCooldown.Count(changed))
+            TellPlayer(changed, ChatCooldown.Started);
+    }
+
+    private void TellUnheardReadiness()
+    {
+        if (unheardReadiness == 0 || ChatCooldown.Remaining(unheardReadiness) > 0f)
+            return;
+        unheardReadiness = 0;
+        if (!InLobby || peers.Count == 0)
+            return;
+        var (readied, present) = Readiness();
+        string text = Standing(readied, present);
         if (text == toldReadiness)
             return;
         toldReadiness = text;
         Tell(text);
+    }
+
+    // How many of the players present are ready, of how many.
+    private (int readied, int present) Readiness()
+    {
+        int present = 0, readied = 0;
+        for (int slot = 1; slot <= MaxPlayers; slot++)
+        {
+            if (names[slot] == null)
+                continue;
+            present++;
+            if (ready[slot])
+                readied++;
+        }
+        return (readied, present);
+    }
+
+    private static string Standing(int readied, int present) =>
+        readied < present ? $"Waiting for players to ready up ({readied}/{present} ready)." : "Everyone is ready.";
+
+    // Host: a player's line reaches everyone unless they wait from saying too much; then they alone hear how long.
+    private void SayFor(int slot, string text)
+    {
+        if (text.Length == 0 || names[slot] == null)
+            return;
+        if (ChatCooldown.Remaining(slot) > 0f)
+        {
+            TellPlayer(slot, ChatCooldown.Waiting(slot));
+            return;
+        }
+        Relay(slot, text);
+        if (ChatCooldown.Count(slot))
+            TellPlayer(slot, ChatCooldown.Started);
+    }
+
+    // Host: a line for one player alone, as a command's replies are.
+    private void TellPlayer(int slot, string text)
+    {
+        if (slot == LocalSlot)
+        {
+            ChatLog.Notice(text);
+            return;
+        }
+        foreach (var peer in peers)
+        {
+            if (peer.Value == slot)
+            {
+                Reply(peer.Key, slot, new List<string> { text });
+                return;
+            }
+        }
     }
 
     // Slot 0 is the host's notice of the session: who came or left, and what the lobby waits for.
@@ -1846,6 +1945,7 @@ internal sealed class CoopSession : MonoBehaviour
         resting[slot] = false;
         starting.Remove(slot);
         entrants.Remove(slot);
+        ChatCooldown.Forget(slot);
         SharedPresentation.Forget(slot);
         if (IsHost && KeeperSpawn.Active)
             UpdateRest();

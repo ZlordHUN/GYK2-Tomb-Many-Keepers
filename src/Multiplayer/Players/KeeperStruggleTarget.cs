@@ -6,7 +6,8 @@ using UnityEngine;
 namespace GYK2.TombManyKeepers.Multiplayer.Players;
 
 // The native opening's chain as a joined player's keeper meets it: where the host's keeper finds its chain, the
-// game's own interaction offers "Try To Remove" over the last shackle, and the interaction key struggles.
+// game's own interaction offers "Try To Remove" over the last shackle, and the interaction key struggles. The shackle
+// already cut shows as the half-filled green bar over it, as over the target the cutting player hit.
 [HarmonyPatch]
 internal sealed class KeeperStruggleTarget : MonoBehaviour
 {
@@ -29,6 +30,8 @@ internal sealed class KeeperStruggleTarget : MonoBehaviour
         {
             id = TargetId,
             interactionType = WGODef.InteractionType.Script,
+            // Two shackles' health, as the target another player cuts has.
+            hp = 2,
             hasCustomAssetId = true,
             customInteraction = new CustomInteraction
             {
@@ -50,6 +53,8 @@ internal sealed class KeeperStruggleTarget : MonoBehaviour
         data.SetDataFromDefinition();
         data.TryCreateMainWgoPartData();
         data.PrepareForGame();
+        // This view never enters WorldData; its zero-HP callback must not remove world objects.
+        data.HpComponent.Init();
 
         var wgo = Wgo.Spawn(data, parent, ignoreChunkRegistration: true);
         wgo.name = parent.name + " Struggle Target";
@@ -60,6 +65,8 @@ internal sealed class KeeperStruggleTarget : MonoBehaviour
             Object.Destroy(wgo.gameObject);
             throw new System.InvalidOperationException("Could not load the keeper struggle target.");
         }
+        // The last shackle comes after a cut: its chain shows the green bar the cutting player's hit drew over theirs.
+        data.HpComponent.ApplyDamage(1);
         var chain = wgo.gameObject.AddComponent<KeeperStruggleTarget>();
         chain.target = wgo;
         chain.struggle = struggle;

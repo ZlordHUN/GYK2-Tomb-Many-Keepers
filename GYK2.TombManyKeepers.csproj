@@ -2,6 +2,8 @@
   <Import Project="build/UnityMod.props" />
   <PropertyGroup>
     <Version>0.1</Version>
+    <!-- No Git commit in the version: the same source builds the same DLL on any commit, as players' builds must match. -->
+    <IncludeSourceRevisionInInformationalVersion>false</IncludeSourceRevisionInInformationalVersion>
     <Product>Graveyard Keeper 2: Tomb Many Keepers</Product>
     <EnableDefaultItems>false</EnableDefaultItems>
   </PropertyGroup>

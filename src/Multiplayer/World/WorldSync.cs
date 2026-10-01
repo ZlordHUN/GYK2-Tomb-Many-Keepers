@@ -43,7 +43,10 @@ internal static class WorldSync
         ToolTick,
         Quest,
         Knowledge,
-        Reputation
+        Reputation,
+        Craft,
+        CraftProgress,
+        CampaignValue
     }
 
     // Reliable messages hold at most 512 KiB.
@@ -236,6 +239,15 @@ internal static class WorldSync
                 break;
             case Change.Reputation:
                 SharedKnowledge.ApplyReputation(reader);
+                break;
+            case Change.Craft:
+                CraftProgress.ApplyWhole(reader);
+                break;
+            case Change.CraftProgress:
+                CraftProgress.ApplyProgress(reader);
+                break;
+            case Change.CampaignValue:
+                CampaignValues.Apply(reader);
                 break;
             default:
                 ObjectState.Apply(change, reader);

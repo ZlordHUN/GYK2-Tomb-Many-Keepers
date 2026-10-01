@@ -14,7 +14,9 @@ namespace GYK2.TombManyKeepers.Multiplayer.Presentation;
 // line stays until the speaking player's game closes it. A line of a conversation or cutscene moves on
 // as the game's own press moves it on, pressed by any player who sees it, as GYK1's dialogue did; the
 // keeper's lines are said by the keeper whose turn it is. What a player says in the chat shows the same
-// way above their keeper, as GYK1's chat bubbles, for the game's own time for a line of its length.
+// way above their keeper, as GYK1's chat bubbles, for the game's own time for a line of its length. A
+// player arriving in the scene sees the lines open there, as a player arriving during a cutscene picks
+// it up where it has got to.
 [HarmonyPatch]
 internal static class SharedSpeech
 {
@@ -53,6 +55,8 @@ internal static class SharedSpeech
         AccessTools.MethodDelegate<Action<UIBasicBubble, Vector3, UIBasicBubble.ForceCornerPosition>>(AccessTools.Method(
             typeof(UIBasicBubble), "UpdatePositionAndCorner", new[] { typeof(Vector3), typeof(UIBasicBubble.ForceCornerPosition) }));
     private static readonly List<Line> Shown = new List<Line>();
+    // The players in this game's scene as last seen, to tell the lines open here to those arriving.
+    private static readonly bool[] Present = new bool[CoopSession.MaxPlayers + 1];
     // The bubbles showing a line of this game's conversation, another player's line or a chat line, until the bubble
     // goes or shows another line: a closing bubble lingers for two frames and its fade.
     private static readonly Dictionary<UIDialogBubble, Line> Bubbles = new Dictionary<UIDialogBubble, Line>();
@@ -84,7 +88,7 @@ internal static class SharedSpeech
         var line = new Line { Slot = local, Id = id, Speaker = speaker, Keeper = keeper, Conversation = conversation, Own = true,
             Anchor = anchor, Anchored = anchor != null, Position = anchor != null ? anchor.position : default, ByKeeper = anchor != null };
         var said = data;
-        SharedPresentation.Send(SharedPresentation.Cue.Talk, writer =>
+        line.Told = writer =>
         {
             writer.Write(id);
             writer.Write((byte)speaker);
@@ -98,7 +102,8 @@ internal static class SharedSpeech
             writer.Write((byte)said.cornerPosition);
             writer.Write(said.isOverBlackout);
             writer.Write(said.fixedShowTimeValue);
-        });
+        };
+        SharedPresentation.Send(SharedPresentation.Cue.Talk, line.Told);
         var finished = data.onFinished;
         data.onFinished = line.Closed = () =>
         {
@@ -124,7 +129,8 @@ internal static class SharedSpeech
         var corner = (UIBasicBubble.ForceCornerPosition)reader.ReadByte();
         bool overBlackout = reader.ReadBoolean();
         float fixedTime = reader.ReadSingle();
-        if (!SharedPresentation.Watches(slot))
+        // A line told again for a player arriving shows once.
+        if (!SharedPresentation.Watches(slot) || Shown.Exists(shown => shown.Slot == slot && shown.Id == id && !shown.Ended))
             return;
         // The keeper whose turn it is here says it above this game's own keeper, as the game has it.
         bool mine = keeper == CoopSession.Current.LocalSlot;
@@ -247,6 +253,27 @@ internal static class SharedSpeech
 
     private static void ShareShown(int id) => SharedPresentation.Send(SharedPresentation.Cue.TalkShown, writer => writer.Write(id));
 
+    // Each frame: a player who has come into this game's scene is told the lines this game has open, where a line
+    // already shown shows once.
+    internal static void Update()
+    {
+        bool arrived = false;
+        for (int slot = 1; slot < Present.Length; slot++)
+        {
+            bool here = SharedPresentation.Watches(slot);
+            arrived |= here && !Present[slot];
+            Present[slot] = here;
+        }
+        if (!arrived)
+            return;
+        foreach (var said in Bubbles)
+        {
+            var line = said.Value;
+            if (line.Own && line.Told != null && !line.Chat && Showing(said.Key, line) && !Disappearing(said.Key))
+                SharedPresentation.Send(SharedPresentation.Cue.Talk, line.Told);
+        }
+    }
+
     internal static void Forget(int slot)
     {
         foreach (var line in Shown)
@@ -320,7 +347,8 @@ internal static class SharedSpeech
     }
 
     // A press moves on a line of this game's conversation as the game has it, and the turn is this game's player's;
-    // on another player's line it moves the line on in their game, and shows its whole text here at once.
+    // on another player's line it moves the line on in their game, and shows its whole text here at once, for a player
+    // taking part in it: one roaming far away reads the line, and their clicks and keys stay their own.
     [HarmonyPrefix]
     [HarmonyPatch(typeof(UISpeechBubble), "CheckSkip")]
     private static bool Press(UISpeechBubble __instance, out bool __state)
@@ -336,7 +364,7 @@ internal static class SharedSpeech
             wasShowTime = ShowTime(bubble);
             return true;
         }
-        if (!SkipPressed(bubble))
+        if (!WatchedCutscene.Joins(line.Slot) || !SkipPressed(bubble))
             return false;
         LazyInput.ClearAllKeysDown();
         bool ending = !Letters(bubble).IsAnimating;
@@ -448,5 +476,7 @@ internal static class SharedSpeech
         internal Action Closed;
         internal bool Ended;
         internal bool Hidden;
+        // How this game's own line was told, to tell it again to a player arriving.
+        internal Action<BinaryWriter> Told;
     }
 }
