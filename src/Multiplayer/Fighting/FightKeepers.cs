@@ -46,10 +46,12 @@ internal static class FightKeepers
         int slot = session.LocalSlot, hp = health.Hp, maxHp = health.MaxHpValue;
         float energy = stamina != null ? stamina.Get() : 0f;
         bool armor = ArmorView(player), helmet = ArmorHelmet(player);
+        // The weapon in hand, as the game picks it: a guest with an empty belt still fights with the default sword.
+        var attack = player.AttackComponent;
         var layer = !helmet ? AnimationComponent.Layers.ArmorNoHelmet
-            : player.Sword.id != "empty" ? AnimationComponent.Layers.ArmorWithSword
-            : player.Bow.id != "empty" ? AnimationComponent.Layers.ArmorWithBow
-            : AnimationComponent.Layers.Armor;
+            : attack == null || !attack.HasEquippedWeapon ? AnimationComponent.Layers.Armor
+            : attack.IsRangedWeapon ? AnimationComponent.Layers.ArmorWithBow
+            : AnimationComponent.Layers.ArmorWithSword;
         WorldSync.Queue(WorldSync.Change.FightKeeper, Guid.Empty, writer =>
         {
             writer.Write((byte)slot);
