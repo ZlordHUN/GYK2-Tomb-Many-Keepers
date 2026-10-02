@@ -10,7 +10,7 @@ using UnityEngine.UI;
 namespace GYK2.TombManyKeepers.UI.Mods;
 
 // The mods the Mods window lists, each on a copy of the save list's own card, as GYK1 listed them on its save cards:
-// the mod's name, then its version and how many settings it shows. A click picks a mod, lit in gold as a picked game
+// the mod's name, then its version and how many settings and controls it shows. A click picks a mod, lit in gold as a picked game
 // is in Join Game, and the window shows its settings; a gamepad picks the mod it moves to, and its select key enters
 // the settings.
 internal sealed class ModList
@@ -54,9 +54,20 @@ internal sealed class ModList
         return name.StartsWith(Game, StringComparison.OrdinalIgnoreCase) && name.Length > Game.Length ? name.Substring(Game.Length).Trim() : name;
     }
 
-    // Lists the mods loaded now by their names, each with the settings it shows, and picks the mod picked before if
-    // it is still loaded, or else the first.
-    internal void Show(IEnumerable<PluginInfo> plugins, Func<PluginInfo, int> settings)
+    // How many settings and controls a mod shows, in words.
+    private static string Counted(int settings, int controls)
+    {
+        var parts = new List<string>();
+        if (settings > 0)
+            parts.Add(settings == 1 ? "1 setting" : settings + " settings");
+        if (controls > 0)
+            parts.Add(controls == 1 ? "1 control" : controls + " controls");
+        return parts.Count == 0 ? "No settings" : string.Join(", ", parts);
+    }
+
+    // Lists the mods loaded now by their names, each with the settings and controls it shows, and picks the mod picked
+    // before if it is still loaded, or else the first.
+    internal void Show(IEnumerable<PluginInfo> plugins, Func<PluginInfo, (int settings, int controls)> shown)
     {
         foreach (var old in cards)
         {
@@ -66,7 +77,7 @@ internal sealed class ModList
         }
         cards.Clear();
         foreach (var plugin in plugins.OrderBy(Named, StringComparer.OrdinalIgnoreCase))
-            cards.Add(Add(plugin, settings(plugin)));
+            cards.Add(Add(plugin, shown(plugin)));
         // The list's end ornament follows the cards.
         list.Find("Footer")?.SetAsLastSibling();
         var again = cards.FirstOrDefault(item => item.Plugin == Picked) ?? cards.FirstOrDefault();
@@ -82,7 +93,7 @@ internal sealed class ModList
     // Whether a part, such as a gamepad's focus, is one of the cards.
     internal bool Lists(Component part) => part != null && part.transform.parent == list;
 
-    private Card Add(PluginInfo plugin, int settings)
+    private Card Add(PluginInfo plugin, (int settings, int controls) shown)
     {
         var button = NativeWindow.Card(card, list, plugin.Metadata.GUID, null);
         var root = button.gameObject;
@@ -99,8 +110,7 @@ internal sealed class ModList
             text.overflowMode = TextOverflowModes.Ellipsis;
         }
         name.text = NativeWindow.Literal(Named(plugin));
-        status.text = NativeWindow.Literal(plugin.Metadata.Version.ToString()) + "  -  " +
-                      (settings == 0 ? "No settings" : settings == 1 ? "1 setting" : settings + " settings");
+        status.text = NativeWindow.Literal(plugin.Metadata.Version.ToString()) + "  -  " + Counted(shown.settings, shown.controls);
         var item = new Card
         {
             Plugin = plugin,

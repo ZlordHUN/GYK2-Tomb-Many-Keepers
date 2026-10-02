@@ -27,7 +27,13 @@ internal static class SharedPresentation
         Effect,
         Lighting,
         LightOverride,
-        Screen
+        Screen,
+        TalkSkip,
+        TalkShown,
+        AnswerPoint,
+        AnswerPick,
+        Tutorial,
+        TutorialClosed
     }
 
     private static readonly MemoryStream Packet = new MemoryStream();
@@ -98,10 +104,18 @@ internal static class SharedPresentation
             case Cue.TalkEnd:
                 SharedSpeech.End(slot, reader);
                 break;
+            case Cue.TalkSkip:
+                SharedSpeech.Skip(slot, reader);
+                break;
+            case Cue.TalkShown:
+                SharedSpeech.Complete(slot, reader);
+                break;
             case Cue.Answers:
             case Cue.AnswerHover:
             case Cue.AnswerChosen:
             case Cue.AnswersClosed:
+            case Cue.AnswerPoint:
+            case Cue.AnswerPick:
                 SharedAnswers.Apply(slot, cue, reader);
                 break;
             case Cue.Wisp:
@@ -116,6 +130,12 @@ internal static class SharedPresentation
             case Cue.LightOverride:
                 SceneLighting.Apply(slot, cue, reader);
                 break;
+            case Cue.Tutorial:
+                SharedTutorials.Arrive(slot, reader);
+                break;
+            case Cue.TutorialClosed:
+                SharedTutorials.Advance(reader);
+                break;
         }
     });
 
@@ -127,6 +147,21 @@ internal static class SharedPresentation
         try
         {
             show();
+        }
+        finally
+        {
+            Applying = was;
+        }
+    }
+
+    // This game's own story, moved on by another player's cue: what it shows next is shared as ever.
+    internal static void Unmirrored(Action act)
+    {
+        bool was = Applying;
+        Applying = false;
+        try
+        {
+            act();
         }
         finally
         {
@@ -150,5 +185,8 @@ internal static class SharedPresentation
             Forget(slot);
         RemoteWisps.Reset();
         WatchedCutscene.Reset();
+        DialogueTurns.Reset();
+        SceneLighting.Clear();
+        SharedTutorials.Clear();
     }
 }

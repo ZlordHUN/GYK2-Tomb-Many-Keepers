@@ -8,8 +8,10 @@ using UnityEngine.AddressableAssets;
 
 namespace GYK2.TombManyKeepers.UI.Multiplayer;
 
-// A window header with page tabs, copied from the game's character window: its plate and ornaments, a row of
-// tabs with the chosen one inset and diamonds between them, the gamepad's bumper hints and the close button.
+// Page tabs copied from the game's character window: a row of tabs with the chosen one inset and diamonds between
+// them. A window's header takes the character window's own, with its plate and ornaments, the gamepad's bumper hints
+// and the close button; a plate of its own, such as a panel's name, takes the tabs alone, as a narrow plate has no
+// room for the row's end ornaments.
 internal sealed class WindowTabs
 {
     private const string Source = "Assets/AddressableAssets/UIElements/WindowsBig/CharacterWindow_Big.prefab";
@@ -29,20 +31,10 @@ internal sealed class WindowTabs
 
     internal LazyButton Close { get; }
 
-    // Replaces the window frame's own header with the tabbed one.
-    internal WindowTabs(Transform frame, IReadOnlyList<string> names, Action<int> chosen)
+    private WindowTabs(Transform row, IReadOnlyList<string> names, Action<int> chosen, LazyButton close)
     {
         this.chosen = chosen;
-        source ??= Addressables.LoadAssetAsync<GameObject>(Source).WaitForCompletion().GetComponent<CharacterWindow>();
-        var sourceRow = TabRow(source).transform;
-        var own = frame.Find("HeaderGroup");
-        var header = UnityEngine.Object.Instantiate(sourceRow.parent.gameObject, frame).transform;
-        header.name = "HeaderGroup";
-        header.SetSiblingIndex(own.GetSiblingIndex());
-        UnityEngine.Object.DestroyImmediate(own.gameObject);
-        Close = header.Find("CloseButton").GetComponent<LazyButton>();
-
-        var row = header.Find(sourceRow.name);
+        Close = close;
         var template = row.Find(TabTemplate(source).name).GetComponent<CharPageTabButton>();
         template.gameObject.SetActive(false);
         for (int i = 0; i < names.Count; i++)
@@ -56,9 +48,39 @@ internal sealed class WindowTabs
             tab.UpdateState(false);
             tabs.Add(tab);
         }
-        next = row.Find("NextTabGamepadHelper").GetComponent<TMP_Text>();
-        previous = row.Find("PrevTabGamepadHelper").GetComponent<TMP_Text>();
+        next = row.Find("NextTabGamepadHelper")?.GetComponent<TMP_Text>();
+        previous = row.Find("PrevTabGamepadHelper")?.GetComponent<TMP_Text>();
         UpdateHints();
+    }
+
+    // Replaces the window frame's own header with the tabbed one.
+    internal static WindowTabs Header(Transform frame, IReadOnlyList<string> names, Action<int> chosen)
+    {
+        var sourceRow = Row();
+        var own = frame.Find("HeaderGroup");
+        var header = UnityEngine.Object.Instantiate(sourceRow.parent.gameObject, frame).transform;
+        header.name = "HeaderGroup";
+        header.SetSiblingIndex(own.GetSiblingIndex());
+        UnityEngine.Object.DestroyImmediate(own.gameObject);
+        return new WindowTabs(header.Find(sourceRow.name), names, chosen, header.Find("CloseButton").GetComponent<LazyButton>());
+    }
+
+    // The tabs across a plate standing on its own, in place of its name.
+    internal static WindowTabs OnPlate(TMP_Text name, IReadOnlyList<string> names, Action<int> chosen)
+    {
+        var sourceRow = Row();
+        var row = (RectTransform)UnityEngine.Object.Instantiate(sourceRow.gameObject, name.transform.parent).transform;
+        row.name = "Tabs";
+        foreach (string end in new[] { "DecorLeft", "DecorRight", "NextTabGamepadHelper", "PrevTabGamepadHelper" })
+            UnityEngine.Object.DestroyImmediate(row.Find(end).gameObject);
+        name.gameObject.SetActive(false);
+        return new WindowTabs(row, names, chosen, null);
+    }
+
+    private static Transform Row()
+    {
+        source ??= Addressables.LoadAssetAsync<GameObject>(Source).WaitForCompletion().GetComponent<CharacterWindow>();
+        return TabRow(source).transform;
     }
 
     internal void Choose(int index)
@@ -93,6 +115,8 @@ internal sealed class WindowTabs
 
     private static void Hint(TMP_Text hint, GameKey key, bool gamepad)
     {
+        if (hint == null)
+            return;
         hint.gameObject.SetActive(gamepad);
         if (gamepad)
             hint.text = ControllerIconLibrary.GetIconId(key);

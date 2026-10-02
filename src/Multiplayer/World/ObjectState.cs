@@ -14,12 +14,16 @@ namespace GYK2.TombManyKeepers.Multiplayer.World;
 [HarmonyPatch(typeof(WgoData))]
 internal static class ObjectState
 {
+    // The native reactions to an object's first damage, which shows its health bar, the green bar filling as it is mined,
+    // and to its full health restored, which hides the bar.
+    private static readonly AccessTools.FieldRef<HPComponent, Action> FirstDamageDealt =
+        AccessTools.FieldRefAccess<HPComponent, Action>("OnFirstDamageDealt");
+    private static readonly AccessTools.FieldRef<HPComponent, Action> FullHpRestored =
+        AccessTools.FieldRefAccess<HPComponent, Action>("OnFullHpRestored");
     private static readonly AccessTools.FieldRef<WgoData, List<InteractionEvent>> Events =
         AccessTools.FieldRefAccess<WgoData, List<InteractionEvent>>("events");
     private static readonly Action<WgoData> NotifyEvents =
         AccessTools.MethodDelegate<Action<WgoData>>(AccessTools.Method(typeof(WgoData), "NotifyInteractionEventChanged"));
-    // What shows the health bar; setting the value alone never raises it.
-    private static readonly FieldInfo FirstDamage = AccessTools.Field(typeof(HPComponent), nameof(HPComponent.OnFirstDamageDealt));
 
     [HarmonyPostfix]
     [HarmonyPatch(nameof(WgoData.IsHidden), MethodType.Setter)]
@@ -174,11 +178,16 @@ internal static class ObjectState
                 data.SetCustomAnimationTrigger(reader.ReadString());
                 break;
             case WorldSync.Change.Hp:
-                bool wasDamaged = data.HpComponent.wasDamagedAtLeastOnce;
-                data.HpComponent.SetCustomHpValue(reader.ReadInt32(), overrideMaxHpValue: false);
-                data.HpComponent.wasDamagedAtLeastOnce = reader.ReadBoolean();
-                if (!wasDamaged && data.HpComponent.wasDamagedAtLeastOnce)
-                    (FirstDamage?.GetValue(data.HpComponent) as Action)?.Invoke();
+                var health = data.HpComponent;
+                bool damaged = health.wasDamagedAtLeastOnce;
+                health.SetCustomHpValue(reader.ReadInt32(), overrideMaxHpValue: false);
+                health.wasDamagedAtLeastOnce = reader.ReadBoolean();
+                // Another player's first hit shows the health bar here too, as the native first hit does, and the
+                // object's health restored in full hides it; between them the bar follows the health as it is shared.
+                if (!damaged && health.wasDamagedAtLeastOnce)
+                    FirstDamageDealt(health)?.Invoke();
+                else if (damaged && !health.wasDamagedAtLeastOnce)
+                    FullHpRestored(health)?.Invoke();
                 break;
             case WorldSync.Change.ToolTick:
                 data.NotifyApplyTool(reader.ReadBoolean());

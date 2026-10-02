@@ -1,3 +1,4 @@
+using GYK2.TombManyKeepers.Patches.Saves;
 using HarmonyLib;
 using LazyBearTechnology;
 using UnityEngine;
@@ -208,7 +209,15 @@ internal static class KeeperSpawn
         Clear();
         localSlot = slot;
         chainedMembers[slot - 1] = true;
-        MainGame.OnGoToMainMenu += Clear;
+        MainGame.OnGoToMainMenu += LeftForMenu;
+    }
+
+    // Leaving for the main menu takes the keepers away; leaving for a save loading in the game's place keeps what its
+    // load set up.
+    private static void LeftForMenu()
+    {
+        if (!InGameLoadPatches.Reloading)
+            Clear();
     }
 
     private static void Spawn()
@@ -300,7 +309,7 @@ internal static class KeeperSpawn
     {
         PlayerController.OnPlayerTeleported -= Spawn;
         MainGame.OnGameStarted -= Activate;
-        MainGame.OnGoToMainMenu -= Clear;
+        MainGame.OnGoToMainMenu -= LeftForMenu;
         RestoreLocalKeeper();
         Active = false;
         BaysWereOpen = false;

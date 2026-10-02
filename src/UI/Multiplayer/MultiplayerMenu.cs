@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using GYK2.TombManyKeepers.Multiplayer.World;
 using GYK2.TombManyKeepers.Network.Session;
 using GYK2.TombManyKeepers.Network.Steam;
+using HarmonyLib;
 using LazyBearTechnology;
 using UnityEngine;
 using UnityEngine.UI;
@@ -11,12 +12,16 @@ namespace GYK2.TombManyKeepers.UI.Multiplayer;
 
 // The multiplayer screen swaps the main menu buttons for Host Game, Join Game and Back. An invite the player
 // accepts opens Join Game to follow it, at once from the main menu or once the player returns there.
+[HarmonyPatch]
 internal static class MultiplayerMenu
 {
+    // The game's way to its main menu fades for half a second before it leaves the game.
+    private const float LeavingTime = 2f;
     private static readonly List<GameObject> hidden = new List<GameObject>();
     private static UIMainMenuWindow mainMenu;
     private static LazyButton[] buttons;
     private static string closedReason;
+    private static float leftAt = float.NegativeInfinity;
     // The campaign whose settings the host went back from, and the settings chosen for it.
     private static SaveSlotData edited;
     private static HostSettings editedSettings;
@@ -192,21 +197,36 @@ internal static class MultiplayerMenu
 
     internal static void Join(UIMainMenuWindow menu) => ServerBrowser.Open(menu);
 
-    // The lobby ends with its host, so a joined game returns to the main menu.
+    // The lobby ends with its host, so a joined game returns to the main menu: with the windows it showed closed, as the
+    // pause menu's Exit to Menu closes its own and its question first, and only once, so a player already on the way
+    // there when the host left does not leave the game twice.
     private static void ReturnToMenu(string reason)
     {
         closedReason = reason;
         if (WorldSnapshot.IsLoading)
             MainGame.OnGameStarted += LeaveLoadedGame;
         else
-            MainGame.Instance.GoToMenu();
+            Leave();
     }
 
     private static void LeaveLoadedGame()
     {
         MainGame.OnGameStarted -= LeaveLoadedGame;
-        MainGame.Instance.GoToMenu();
+        Leave();
     }
+
+    private static void Leave()
+    {
+        for (int open = 0; open < 32 && LazyWindowsStackController.ActiveWindow is { } window; open++)
+            AccessTools.Method(window.GetType(), "CloseWithoutCallback").Invoke(window, null);
+        bool leaving = MainGame.Instance.gameState == MainGame.GameState.InGame && Time.unscaledTime - leftAt < LeavingTime;
+        if (!leaving)
+            MainGame.Instance.GoToMenu();
+    }
+
+    [HarmonyPrefix]
+    [HarmonyPatch(typeof(MainGame), nameof(MainGame.GoToMenu))]
+    private static void Leaving() => leftAt = Time.unscaledTime;
 
     internal static void ShowError(UIMainMenuWindow menu, string error)
     {

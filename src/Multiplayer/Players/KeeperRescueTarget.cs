@@ -93,6 +93,15 @@ internal sealed class KeeperRescueTarget : MonoBehaviour
             Retire();
     }
 
+    // A cut another player made shows here too: the target keeps as much health as the keeper has shackles left, so
+    // the green bar a native hit draws over it shows in every game.
+    private void Update()
+    {
+        var health = target.Data.HpComponent;
+        if (!retiring && chains.RemainingShackles > 0 && chains.RemainingShackles < health.Hp)
+            health.ApplyDamage(health.Hp - chains.RemainingShackles);
+    }
+
     private void Retire()
     {
         if (retiring)

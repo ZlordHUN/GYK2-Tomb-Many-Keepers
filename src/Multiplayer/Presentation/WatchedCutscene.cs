@@ -1,14 +1,23 @@
 using System;
 using System.IO;
+using GYK2.TombManyKeepers.Multiplayer.Players;
 using GYK2.TombManyKeepers.Multiplayer.Session;
+using GYK2.TombManyKeepers.Network.Session;
 using HarmonyLib;
 using LazyBearTechnology;
 using UnityEngine;
 
 namespace GYK2.TombManyKeepers.Multiplayer.Presentation;
 
-// Players in the same scene watch another player's cutscene: its letterbox, the view of its camera
-// and its fades, with their own keeper held still until the cutscene ends.
+// Another player's cutscene plays for everyone in its scene, as GYK1's did: its lines, characters and effects show in
+// the world to players roaming freely. Its letterbox, the view of its camera, its fades and its sounds take over only
+// for a player who comes close to the keeper whose cutscene it is, about a third of a screen, as GYK1's did; that
+// player's keeper is then held until the cutscene ends, walks over beside that keeper, on the side it does not face,
+// faces as it faces and keeps by it if it moves. A keeper still in its chains, which cannot come closer, watches from
+// its bay. A cutscene stays in its scene: a player taking part stops once the keeper whose cutscene it is leaves it, and
+// a cutscene that begins as a keeper takes an exit, such as the prison's door, is theirs alone, since only they leave.
+// The others follow by taking the exit themselves, and a player arriving in a scene, by an exit or by joining the game,
+// joins a cutscene running there wherever their keeper stands, where it has got to.
 [HarmonyPatch]
 internal static class WatchedCutscene
 {
@@ -34,6 +43,30 @@ internal static class WatchedCutscene
     private const float FlyTime = 0.5f;
     // How quickly the watched view closes in on each shared camera point.
     private const float Smoothing = 12f;
+    // GYK1's distances, in its tiles of about two of this game's units: the cutscene takes over within 3.6 tiles, the
+    // keeper stands half a tile beside the other, walks after it once a tile away, and hurries past 1.25 tiles.
+    private const float JoinDistance = 7f, Beside = 1f, FollowFrom = 1.8f, HurryFrom = 2.4f;
+    // The story's own walking pace for a keeper in a cutscene, and a hurried one.
+    private const float WalkSpeed = 1.5f, HurrySpeed = 2.2f;
+    private const float FollowInterval = 0.25f, WalkTimeout = 10f, WalkGrace = 0.25f, PathGrace = 1f;
+    // An exit's cutscene that never leads out keeps its keeper's cutscenes their own no longer than this.
+    private const float LeavingTimeout = 60f;
+    // How long after arriving in a scene a player joins a cutscene running there from anywhere in it.
+    private const float ArrivalWindow = 5f;
+    private static readonly AccessTools.FieldRef<WGOInteractionHandlerBase, Wgo> Assigned =
+        AccessTools.FieldRefAccess<WGOInteractionHandlerBase, Wgo>("assignedWgo");
+    // Players whose cutscene runs, which this player joins on coming close, and those whose cutscene is an exit's.
+    private static readonly bool[] Running = new bool[CoopSession.MaxPlayers + 1];
+    private static readonly bool[] Leaving = new bool[CoopSession.MaxPlayers + 1];
+    private static bool walking, walkMoved, walkTried;
+    private static float walkedAt, nextFollow;
+    // The scene this game's keeper took an exit from, until it has left it or the exit's cutscene has ended.
+    private static string leavingScene;
+    private static float leavingSince;
+    // The scene this game's keeper was last seen in, and when it arrived there once the teleport let go.
+    private static string sceneSeen;
+    private static bool arriving;
+    private static float arrivedAt = float.NegativeInfinity;
     private static float nextCamera;
     private static float nextCinematic;
     private static float nextScreen;
@@ -49,6 +82,35 @@ internal static class WatchedCutscene
 
     // This game shows a cutscene of its own, not another player's mirrored.
     internal static bool InOwnCutscene => ownCinematic;
+
+    // This player takes part in the cutscene of the player given.
+    internal static bool Watching(int slot) => slot != 0 && watched == slot;
+
+    // This player takes part in what the player given plays out: their cutscene, or a conversation near them. A player
+    // roaming far away sees it only, as does one staying behind while that player takes an exit.
+    internal static bool Joins(int slot) => Watching(slot) || SharedPresentation.Watches(slot) && !Leaving[slot] && (Chained || Near(slot));
+
+    // The local keeper is still in its chains.
+    private static bool Chained => RemoteKeeper.LocalShackles() > 0;
+
+    private static bool Near(int slot) => Apart(slot) is float apart && apart <= JoinDistance;
+
+    private static bool JustArrived => Time.unscaledTime - arrivedAt <= ArrivalWindow;
+
+    // This game's cutscene began as its keeper took an exit, which it has not left by yet.
+    private static bool LeavingNow => leavingScene != null && MainGame.PlayerData != null &&
+        MainGame.PlayerData.currentGameSceneId == leavingScene && Time.unscaledTime - leavingSince <= LeavingTimeout;
+
+    // How far apart this player's keeper and another's stand on the ground, where both are known.
+    private static float? Apart(int slot)
+    {
+        var other = RemoteKeeper.PositionOf(slot);
+        var player = MainGame.PlayerController;
+        if (other == null || player == null)
+            return null;
+        var own = player.PhysicalBody.transform.position;
+        return Vector2.Distance(new Vector2(own.x, own.z), new Vector2(other.Value.x, other.Value.z));
+    }
 
     // Nothing of the world shows: the camera may cut where it would otherwise fly.
     private static bool ScreenBlack
@@ -89,17 +151,47 @@ internal static class WatchedCutscene
         ownCinematic = on;
         nextCinematic = Time.unscaledTime + CinematicInterval;
         ShareCinematic(on, instant);
+        // The exit's cutscene is over; what this game shows next is its own again.
+        if (!on)
+            leavingScene = null;
     }
 
-    private static void ShareCinematic(bool on, bool instant) => SharedPresentation.Send(SharedPresentation.Cue.Cinematic, writer =>
+    private static void ShareCinematic(bool on, bool instant)
     {
-        writer.Write(on);
-        writer.Write(instant);
-    });
+        bool leaving = on && LeavingNow;
+        SharedPresentation.Send(SharedPresentation.Cue.Cinematic, writer =>
+        {
+            writer.Write(on);
+            writer.Write(instant);
+            writer.Write(leaving);
+        });
+    }
+
+    // This game's keeper takes an exit: a door, a ladder or a passage that moves its keeper elsewhere.
+    [HarmonyPrefix]
+    [HarmonyPatch(typeof(WGOInteractionHandlerBase), nameof(WGOInteractionHandlerBase.Interact))]
+    private static void Exiting(WGOInteractionHandlerBase __instance, PlayerController interactor) => TakeExit(__instance, interactor);
+
+    [HarmonyPrefix]
+    [HarmonyPatch(typeof(WGOInteractionHandlerBase), nameof(WGOInteractionHandlerBase.Interact2))]
+    private static void ExitingOther(WGOInteractionHandlerBase __instance, PlayerController interactor) => TakeExit(__instance, interactor);
+
+    private static void TakeExit(WGOInteractionHandlerBase handler, PlayerController interactor)
+    {
+        if (SharedPresentation.Applying || interactor == null || interactor != MainGame.PlayerController || MainGame.PlayerData == null)
+            return;
+        var exits = Assigned(handler)?.Data?.Definition?.teleportDestinationWgoIds;
+        if (exits == null || exits.Count == 0)
+            return;
+        leavingScene = MainGame.PlayerData.currentGameSceneId;
+        leavingSince = Time.unscaledTime;
+    }
 
     // The point this game's camera follows during its own cutscene, shared with the frame's changes.
     internal static void Share()
     {
+        if (leavingScene != null && !LeavingNow)
+            leavingScene = null;
         if (Time.unscaledTime >= nextScreen)
         {
             nextScreen = Time.unscaledTime + ScreenInterval;
@@ -161,11 +253,13 @@ internal static class WatchedCutscene
         switch (cue)
         {
             case SharedPresentation.Cue.Cinematic:
-                bool on = reader.ReadBoolean(), instant = reader.ReadBoolean();
-                if (on && watched == 0 && SharedPresentation.Watches(slot) && !LazyUI.Get<UICinematic>().gameObject.activeSelf)
-                    Begin(slot, instant);
-                else if (!on && watched == slot)
+                bool on = reader.ReadBoolean(), instant = reader.ReadBoolean(), leaving = reader.ReadBoolean();
+                Running[slot] = on;
+                Leaving[slot] = on && leaving;
+                if (watched == slot && (!on || leaving))
                     End(instant);
+                else if (on && !leaving && watched == 0 && CanJoin(slot))
+                    Join(slot, instant);
                 break;
             case SharedPresentation.Cue.Camera:
                 var position = new Vector3(reader.ReadSingle(), reader.ReadSingle(), reader.ReadSingle());
@@ -179,14 +273,14 @@ internal static class WatchedCutscene
                 float time = reader.ReadSingle();
                 // The screen that player darkened brightens with theirs, wherever this player has gone since.
                 bool brightens = kind == Fade.Out || kind == Fade.OutInstant;
-                if (SharedPresentation.Watches(slot) || brightens && darkenedBy == slot)
+                if (watched == slot || brightens && darkenedBy == slot)
                     ShowFade(slot, kind, time);
                 break;
             case SharedPresentation.Cue.Screen:
                 bool dark = reader.ReadBoolean();
                 if (!dark && darkenedBy == slot)
                     ShowFade(slot, Fade.Out, BrightenTime);
-                else if (dark && darkenedBy == 0 && SharedPresentation.Watches(slot))
+                else if (dark && darkenedBy == 0 && watched == slot)
                     ShowFade(slot, Fade.InInstant, 0f);
                 break;
         }
@@ -198,6 +292,110 @@ internal static class WatchedCutscene
     {
         if (dark)
             SharedPresentation.Mirror(() => ShowFade(slot, Fade.InInstant, 0f));
+    }
+
+    // Each frame: a player not yet taking part joins a cutscene running near them, or anywhere in the scene they have just
+    // arrived in; one taking part keeps by its keeper while both stay in that scene.
+    internal static void Update()
+    {
+        NoteArrival();
+        if (watched != 0)
+        {
+            if (!SharedPresentation.Watches(watched))
+                SharedPresentation.Mirror(() => End(instant: false));
+            else
+                Follow();
+            return;
+        }
+        for (int slot = 1; slot < Running.Length; slot++)
+        {
+            if (Running[slot] && !Leaving[slot] && CanJoin(slot))
+            {
+                SharedPresentation.Mirror(() => Join(slot, instant: false));
+                return;
+            }
+        }
+    }
+
+    // A new scene for this game's keeper, which it arrives in once its teleport lets go of it.
+    private static void NoteArrival()
+    {
+        var player = MainGame.PlayerController;
+        string scene = MainGame.PlayerData?.currentGameSceneId;
+        if (scene != sceneSeen)
+        {
+            sceneSeen = scene;
+            arriving = true;
+        }
+        if (arriving && player != null && player.IsControlEnabledByType(TakenControlType.ByTeleport))
+        {
+            arriving = false;
+            arrivedAt = Time.unscaledTime;
+        }
+    }
+
+    // In its scene, near its keeper, chained or just arrived, awake and not in a cutscene of this game's own.
+    private static bool CanJoin(int slot) => SharedPresentation.Watches(slot) && !LazyUI.Get<UICinematic>().gameObject.activeSelf &&
+        MainGame.PlayerController != null && !MainGame.PlayerData.energySystem.IsSleeping && (Chained || Near(slot) || JustArrived);
+
+    private static void Join(int slot, bool instant)
+    {
+        Begin(slot, instant);
+        walking = walkTried = false;
+        nextFollow = 0f;
+        Follow();
+    }
+
+    // The keeper walks over beside the other at the story's pace, or hurries after it, and faces as it faces once there.
+    private static void Follow()
+    {
+        if (walking)
+        {
+            float walked = Time.unscaledTime - walkedAt;
+            var movement = MainGame.PlayerController.MovementComponent;
+            walkMoved |= movement.IsMoving;
+            // A stopped path calls back no more, and one the game could not find never moves or calls back: the game
+            // holds the keeper for a path until it ends, so ending it hands the keeper back to its player's keys.
+            if (walked > WalkTimeout || walkMoved && walked > WalkGrace && !movement.IsMoving || !walkMoved && walked > PathGrace)
+            {
+                movement.ForceStop();
+                Arrived();
+            }
+            return;
+        }
+        if (Time.unscaledTime < nextFollow || Chained)
+            return;
+        nextFollow = Time.unscaledTime + FollowInterval;
+        if (Apart(watched) is float apart && apart > FollowFrom)
+            Walk(apart > HurryFrom ? HurrySpeed : WalkSpeed);
+    }
+
+    // Half a tile beside the other keeper, on the side it does not face: right of it unless it faces right.
+    private static void Walk(float speed)
+    {
+        var other = RemoteKeeper.PositionOf(watched);
+        var facing = RemoteKeeper.FacingOf(watched) ?? Vector2.down;
+        if (other == null || !SharedPresentation.Watches(watched))
+            return;
+        var target = other.Value + Vector3.right * (facing.ConvertFromVector2() == Direction.Right ? -Beside : Beside);
+        var player = MainGame.PlayerController;
+        string scene = MainGame.PlayerData.currentGameSceneId;
+        walking = walkTried = true;
+        walkMoved = false;
+        walkedAt = Time.unscaledTime;
+        if (player.MovementComponent.StartPath(target, scene, scene, MovementType.Recast, speed, string.Empty, Arrived,
+                player.PlayerLocalAreaMovement.Seeker) != MovementComponent.StartPathResult.Started)
+            Arrived();
+    }
+
+    private static void Arrived()
+    {
+        if (!walking)
+            return;
+        walking = false;
+        var facing = watched != 0 ? RemoteKeeper.FacingOf(watched) : null;
+        if (facing != null)
+            MainGame.PlayerController.PhysicalBody.SetFacingDirection(facing.Value);
     }
 
     private static void Begin(int slot, bool instant)
@@ -217,6 +415,10 @@ internal static class WatchedCutscene
 
     private static void End(bool instant)
     {
+        // Whatever became of the walks, the keeper goes back to its player's keys.
+        if (walkTried && MainGame.PlayerController != null)
+            MainGame.PlayerController.MovementComponent.ForceStop();
+        walking = walkTried = false;
         watched = 0;
         pointKnown = false;
         if (view != null)
@@ -260,10 +462,18 @@ internal static class WatchedCutscene
     {
         ownCinematic = false;
         nextScreen = 0f;
+        leavingScene = null;
+        sceneSeen = null;
+        arriving = false;
+        arrivedAt = float.NegativeInfinity;
+        Array.Clear(Running, 0, Running.Length);
+        Array.Clear(Leaving, 0, Leaving.Length);
     }
 
     internal static void Forget(int slot)
     {
+        Running[slot] = false;
+        Leaving[slot] = false;
         if (watched == slot)
             End(instant: false);
         if (darkenedBy != slot)

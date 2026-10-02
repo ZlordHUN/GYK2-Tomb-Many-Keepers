@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using DG.Tweening;
+using GYK2.TombManyKeepers.Patches.Saves;
 using HarmonyLib;
 using LazyBearTechnology;
 using TMPro;
@@ -195,7 +196,15 @@ internal static class NativeWindow
     {
         var slot = UnityEngine.Object.Instantiate(template, parent);
         slot.name = name;
-        slot.Show(Loadable, canDelete: false);
+        SaveKindPatches.Displaying = true;
+        try
+        {
+            slot.Show(Loadable, canDelete: false);
+        }
+        finally
+        {
+            SaveKindPatches.Displaying = false;
+        }
         slot.SetSourceLabel(source);
         var button = slot.GetComponent<LazyButton>();
         UnityEngine.Object.DestroyImmediate(slot);

@@ -1,10 +1,11 @@
 using System.Collections.Generic;
 using System.Net;
 using System.Text;
+using GYK2.TombManyKeepers.Multiplayer.Chat;
 using GYK2.TombManyKeepers.Multiplayer.Players;
-using GYK2.TombManyKeepers.Multiplayer.Session;
 using GYK2.TombManyKeepers.Network.Session;
 using GYK2.TombManyKeepers.Network.Steam;
+using GYK2.TombManyKeepers.Patches.Saves;
 using HarmonyLib;
 using LazyBearTechnology;
 using TMPro;
@@ -22,7 +23,8 @@ namespace GYK2.TombManyKeepers.UI.Multiplayer;
 // Everything is a copy of the game's own header plates, cells, text fields, buttons and save card. As in GYK1,
 // everyone readies up, each ready player's avatar lit in gold: the host alone starts at once, and with others
 // its Start Game becomes a Ready button like theirs until everyone is ready. A later player readies up in the
-// running game's lobby and joins it. Each player's name in the chat takes their colour.
+// running game's lobby and joins it. The chat shows the session's one chat log, which the game's chat shows too, each
+// player's name in their colour, under the tab chosen on its plate: Players or NPCs, the game's chat showing the same.
 internal sealed class LobbyWindow : LazyWindow<LazyWidgetDataBase>
 {
     // Where GYK1's lobby has its parts, on the 640 by 360 screen: the columns' centres, and the rows'.
@@ -38,10 +40,14 @@ internal sealed class LobbyWindow : LazyWindow<LazyWidgetDataBase>
     private const float NarrowWidth = 640f, WideWidth = 980f, FriendsColumn = 830f, WideScreen = 1060f;
     private const float FriendHeight = 36f, FriendGap = 6f, FriendPadding = 8f, Relisting = 5f;
     private const string SystemTag = "#E8A33E", SystemText = "#CFC9C0", NameColor = "#FFBD00", SaidColor = "#DDD3C0";
+    // A character's name in the NPCs tab, grey while unknown.
+    private const string NpcName = "#E0B878", UnknownName = "#A09A94";
     private const string CodeColor = "#968D88";
     private static readonly AccessTools.FieldRef<UISaveSlotsWindow, UISaveSlot> SaveCard =
         AccessTools.FieldRefAccess<UISaveSlotsWindow, UISaveSlot>("uiSaveSlotPrefab");
     private static LobbyWindow instance;
+    // The session whose lobby the host has greeted, once.
+    private static CoopSession greeted;
 
     private readonly HashSet<ulong> invited = new HashSet<ulong>();
     private UIMainMenuWindow menu;
@@ -61,6 +67,8 @@ internal sealed class LobbyWindow : LazyWindow<LazyWidgetDataBase>
     private LobbyPlayers players;
     private GameObject card;
     private SaveSlotData shownWorld;
+    private WindowTabs tabs;
+    private UIDialogWindowButton send;
     private TMP_Text log;
     private ScrollRect scroll;
     private TMP_InputField input;
@@ -79,7 +87,9 @@ internal sealed class LobbyWindow : LazyWindow<LazyWidgetDataBase>
         instance.drawn = null;
         CoopSession.Loading += instance.Enter;
         CoopSession.Failed += instance.Report;
-        LobbyChat.Changed += instance.DrawChat;
+        ChatLog.Changed += instance.DrawChat;
+        NpcNames.Changed += instance.DrawChat;
+        ChatTabs.Changed += instance.ShowTab;
         menu.Close();
         instance.Open((LazyWidgetDataBase)null);
     }
@@ -119,7 +129,9 @@ internal sealed class LobbyWindow : LazyWindow<LazyWidgetDataBase>
         window.players = new LobbyPlayers(panel.rectTransform, cell, selection, line);
         NativeWindow.Plate(plate, layout, "World", LeftColumn, WorldPlateRow, PlateWidth);
 
-        NativeWindow.Plate(plate, layout, "Chat", RightColumn, PlateRow, PlateWidth);
+        // The chat's tabs stand on its plate in place of its name.
+        window.tabs = WindowTabs.OnPlate(NativeWindow.Plate(plate, layout, "Chat", RightColumn, PlateRow, PlateWidth), ChatTabs.Names,
+            index => ChatTabs.Current = (ChatTabs.Tab)index);
         window.log = Shown(box, layout, "Chat panel");
         // A little room between a message's lines, and more between messages, in whole units.
         window.log.lineSpacing = LineGap / (window.log.fontSize * 0.01f);
@@ -130,7 +142,7 @@ internal sealed class LobbyWindow : LazyWindow<LazyWidgetDataBase>
         float fieldWidth = PanelWidth - SendWidth - 6f;
         NativeWindow.Place(window.input.transform, RightColumn - PanelWidth / 2f + fieldWidth / 2f, SayRow, fieldWidth, SayHeight);
         window.input.onSubmit.AddListener(window.Say);
-        Navigable(Placed(NativeWindow.Button(button, NativeWindow.ButtonRow(layout), "Send", () => window.Say(window.input.text)),
+        window.send = Navigable(Placed(NativeWindow.Button(button, NativeWindow.ButtonRow(layout), "Send", () => window.Say(window.input.text)),
             RightColumn + PanelWidth / 2f - SendWidth / 2f, SayRow));
 
         AddFriends(window, plate, cell, line, button);
@@ -289,7 +301,7 @@ internal sealed class LobbyWindow : LazyWindow<LazyWidgetDataBase>
         // The field makes its own caret as it wakes, so the template's copied one goes.
         foreach (var caret in input.GetComponentsInChildren<TMP_SelectionCaret>(true))
             Object.DestroyImmediate(caret.gameObject);
-        input.characterLimit = LobbyChat.MaxLength;
+        input.characterLimit = ChatLog.MaxLength;
         input.lineType = TMP_InputField.LineType.SingleLine;
         // As the native field does, a tab is not typed.
         input.onValidateInput = (text, index, added) => added == '\t' ? '\0' : added;
@@ -310,6 +322,7 @@ internal sealed class LobbyWindow : LazyWindow<LazyWidgetDataBase>
         var session = CoopSession.Current;
         ShowWorld(session.World);
         Greet(session);
+        MarkTab();
         DrawChat();
         drawn = null;
         Refresh();
@@ -324,7 +337,15 @@ internal sealed class LobbyWindow : LazyWindow<LazyWidgetDataBase>
         if (card != null)
             DestroyImmediate(card);
         var slot = Instantiate(SaveCard(LazyUI.GetWindow<UISaveSlotsWindow>()), layout);
-        slot.Show(world, canDelete: false);
+        SaveKindPatches.Displaying = true;
+        try
+        {
+            slot.Show(world, canDelete: false);
+        }
+        finally
+        {
+            SaveKindPatches.Displaying = false;
+        }
         card = slot.gameObject;
         card.name = "World card";
         // The copy only shows the world: what picks, deletes or imports a save goes.
@@ -338,20 +359,27 @@ internal sealed class LobbyWindow : LazyWindow<LazyWidgetDataBase>
         NativeWindow.Place(card.transform, LeftColumn, WorldTop + WorldHeight / 2f, PanelWidth, WorldHeight);
     }
 
-    // The lobby's first lines, as GYK1's: whether the game waits or runs, and the host's settings.
+    // The lobby's first lines, as GYK1's: the host tells everyone, players arriving later too, that the lobby waits for
+    // them and how it set the game; a game for the host alone waits for no one. A player arriving in a running game hears
+    // how to join it.
     private static void Greet(CoopSession session)
     {
         var settings = session.Settings;
         bool running = !session.IsHost && !session.InLobby && !session.StartedTogether;
-        if (session.IsHost)
-            Notice("Waiting for players...");
+        if (session.IsHost && greeted != session)
+        {
+            greeted = session;
+            if (settings.Players > 1)
+                session.Tell("Waiting for players...");
+            string keepers = settings.Players == 1 ? "One keeper" : $"Up to {settings.Players} keepers";
+            session.Tell($"{keepers}. {settings.Visibility}, {settings.NetworkShown}, cheats {(settings.Cheats ? "on" : "off")}.");
+        }
         else if (running)
             Notice("The game is in progress. Ready up, then join.");
-        Notice($"Up to {settings.Players} keepers. {settings.Visibility}, cheats {(settings.Cheats ? "on" : "off")}.");
     }
 
-    // A line of the lobby's own for this player only.
-    private static void Notice(string text) => LobbyChat.Add(0, null, text);
+    // A reply of the lobby's own to what this player pressed, for them alone.
+    private static void Notice(string text) => ChatLog.Notice(text);
 
     protected override void Update()
     {
@@ -540,33 +568,11 @@ internal sealed class LobbyWindow : LazyWindow<LazyWidgetDataBase>
         layout.RefreshContentFitter();
     }
 
-    // The host readies up or stops being ready; readied, it hears whom the game still waits for, as GYK1's host did.
+    // The host readies up or stops being ready, as every player does; the session tells everyone how many are ready.
     private static void ToggleHostReady()
     {
         var session = CoopSession.Current;
-        if (session == null)
-            return;
-        bool readying = !session.IsReady(session.LocalSlot);
-        session.SetReady(readying);
-        if (!readying || session.CanStart)
-            return;
-        var (readied, present) = Readiness(session);
-        Notice($"Waiting for players to ready up ({readied}/{present} ready).");
-    }
-
-    // How many players present are ready, of how many.
-    private static (int readied, int present) Readiness(CoopSession session)
-    {
-        int present = 0, readied = 0;
-        for (int slot = 1; slot <= CoopSession.MaxPlayers; slot++)
-        {
-            if (session.PlayerName(slot) == null)
-                continue;
-            present++;
-            if (session.IsReady(slot))
-                readied++;
-        }
-        return (readied, present);
+        session?.SetReady(!session.IsReady(session.LocalSlot));
     }
 
     private void Draw(string text, System.Action pressed)
@@ -576,25 +582,57 @@ internal sealed class LobbyWindow : LazyWindow<LazyWidgetDataBase>
     }
 
     // The chat follows its latest line while the player reads at its end, and stays put when scrolled back.
-    private void DrawChat()
+    private void DrawChat() => DrawChat(following: false);
+
+    private void DrawChat(bool following)
     {
         var viewport = scroll.viewport.rect;
-        bool following = scroll.verticalNormalizedPosition <= 0.01f || log.rectTransform.rect.height <= viewport.height;
-        log.text = Chat(LobbyChat.Lines);
+        following |= scroll.verticalNormalizedPosition <= 0.01f || log.rectTransform.rect.height <= viewport.height;
+        log.text = Chat(ChatLog.Lines, ChatTabs.Current);
         LayoutRebuilder.ForceRebuildLayoutImmediate(log.rectTransform);
         if (following)
             scroll.verticalNormalizedPosition = 0f;
     }
 
-    private static string Chat(IReadOnlyList<LobbyChat.Line> lines)
+    // Another tab was chosen, here or in the game's chat: it shows from its latest line.
+    private void ShowTab()
+    {
+        MarkTab();
+        DrawChat(following: true);
+    }
+
+    // The plate marks the chosen tab. NPCs only shows what was said with the game's people; the players chat under
+    // Players.
+    private void MarkTab()
+    {
+        tabs.Choose((int)ChatTabs.Current);
+        bool players = ChatTabs.Current == ChatTabs.Tab.Players;
+        input.readOnly = !players;
+        send.LazyButton.interactable = players;
+        NativeWindow.SetText((TMP_Text)input.placeholder, players ? "Type message..." : "Switch to Players to chat");
+    }
+
+    private static string Chat(IReadOnlyList<ChatLog.Line> lines, ChatTabs.Tab tab)
     {
         var text = new StringBuilder();
         for (int i = 0; i < lines.Count; i++)
         {
+            var line = lines[i];
+            if (line.Tab != tab)
+                continue;
             if (text.Length > 0)
                 text.Append('\n');
-            var line = lines[i];
-            if (line.Name == null)
+            if (line.Tab == ChatTabs.Tab.Npcs)
+            {
+                // A character's line under the name the players know them by, a keeper's under their player's; its words
+                // in this player's language.
+                string name = line.Npc != null ? NpcNames.Shown(line.Npc) : line.Name;
+                text.Append("<color=").Append(line.Npc != null ? name == NpcNames.Unknown ? UnknownName : NpcName
+                        : PlayerColors.Valid(line.Color) ? PlayerColors.Hex(line.Color) : NameColor).Append('>')
+                    .Append(NativeWindow.Literal(name)).Append(":</color> <color=").Append(SaidColor).Append('>')
+                    .Append(NativeWindow.Literal(LLBase.L(line.Text))).Append("</color>");
+            }
+            else if (line.Name == null)
                 text.Append("<color=").Append(SystemTag).Append(">[System]</color> <color=").Append(SystemText).Append('>')
                     .Append(NativeWindow.Literal(line.Text)).Append("</color>");
             else
@@ -608,6 +646,8 @@ internal sealed class LobbyWindow : LazyWindow<LazyWidgetDataBase>
 
     private void Say(string text)
     {
+        if (ChatTabs.Current != ChatTabs.Tab.Players)
+            return;
         CoopSession.Current?.Say(text);
         input.text = string.Empty;
         input.ActivateInputField();
@@ -655,10 +695,21 @@ internal sealed class LobbyWindow : LazyWindow<LazyWidgetDataBase>
         layout.gameObject.SetActive(true);
         CoopSession.Loading -= Enter;
         CoopSession.Failed -= Report;
-        LobbyChat.Changed -= DrawChat;
+        ChatLog.Changed -= DrawChat;
+        NpcNames.Changed -= DrawChat;
+        ChatTabs.Changed -= ShowTab;
         if (inputSuspended)
             RestoreInput();
         CloseWithoutCallback();
+    }
+
+    // A gamepad's bumpers turn the chat's tabs, as they turn a window's pages.
+    protected override Dictionary<GameKey, System.Func<bool>> GetGameKeyDelegates()
+    {
+        var delegates = base.GetGameKeyDelegates();
+        delegates.Add(GameKey.NextTab, () => tabs.Next());
+        delegates.Add(GameKey.PrevTab, () => tabs.Previous());
+        return delegates;
     }
 
     protected override void TestDraw()

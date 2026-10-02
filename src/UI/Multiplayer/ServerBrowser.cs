@@ -124,7 +124,7 @@ internal sealed class ServerBrowser : LazyWindow<LazyWidgetDataBase>
         // The tabbed header brings the splitter under it.
         DestroyImmediate(frame.Find("Frame/FrameDown").gameObject);
         window.tallest = NativeWindow.TallestFrame(frame);
-        window.tabs = new WindowTabs(frame.Find("Frame"), Tabs, window.Show);
+        window.tabs = WindowTabs.Header(frame.Find("Frame"), Tabs, window.Show);
         NativeWindow.UseCloseButton(window, window.tabs.Close);
 
         var rows = window.content.Find("Scroll/Viewport/Content");

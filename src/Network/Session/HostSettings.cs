@@ -5,9 +5,9 @@ using UnityEngine;
 
 namespace GYK2.TombManyKeepers.Network.Session;
 
-// What the host chose on its settings screen: how many keepers the game takes, who may find and join it and
-// whether cheats are allowed. Everyone in the lobby sees them, but never the password; a saved campaign starts
-// from the ones it was last hosted with.
+// What the host chose on its settings screen: how many keepers the game takes, where it is open and who may find and
+// join it, and whether cheats are allowed. Everyone in the lobby sees them, but never the password; a saved campaign
+// starts from the ones it was last hosted with.
 [HarmonyPatch]
 internal sealed class HostSettings
 {
@@ -21,20 +21,35 @@ internal sealed class HostSettings
         Password
     }
 
-    internal const int FewestPlayers = 2;
+    // An online game is open through Steam's network and listed online as its access allows, and on the local network
+    // too; a LAN game is open and listed on the local network alone.
+    internal enum Reach : byte
+    {
+        Online,
+        LanOnly
+    }
+
+    internal static readonly string[] Reaches = { "Online", "LAN Only" };
+    // A game may be for its host alone, which no one else joins.
+    internal const int FewestPlayers = 1;
     private const string Extension = ".tmkhost";
-    // The file's format; the first had no password.
-    private const byte Format = 2, FirstFormat = 1;
+    // The file's format; the first had no password, the second no network.
+    private const byte Format = 3, PasswordFormat = 2, FirstFormat = 1;
     internal const int PasswordLength = 32;
 
     internal int Players = CoopSession.MaxPlayers;
     internal Access Visibility = Access.Public;
     // What joining a password game asks for; kept by the host alone.
     internal string Password = string.Empty;
-    // For the cheat commands to come; nothing uses it yet.
+    // Where the game is open, which only the host's game needs; the lobby tells everyone.
+    internal Reach Network = Reach.Online;
+    // Whether the other players can use the chat's cheat commands; the host always can, unless it switched its own off.
     internal bool Cheats;
 
     internal HostSettings Copy() => (HostSettings)MemberwiseClone();
+
+    // The network as the lobby's first lines name it.
+    internal string NetworkShown => Network == Reach.LanOnly ? "LAN only" : "online";
 
     internal void Write(BinaryWriter writer)
     {
@@ -60,11 +75,13 @@ internal sealed class HostSettings
         {
             using var reader = new BinaryReader(File.OpenRead(path));
             byte format = reader.ReadByte();
-            if (format != Format && format != FirstFormat)
+            if (format < FirstFormat || format > Format)
                 return new HostSettings();
             var settings = Read(reader);
-            if (format == Format)
+            if (format >= PasswordFormat)
                 settings.Password = reader.ReadString();
+            if (format >= Format)
+                settings.Network = (Reach)Mathf.Min(reader.ReadByte(), (int)Reach.LanOnly);
             return settings;
         }
         catch (Exception exception) when (exception is IOException || exception is UnauthorizedAccessException)
@@ -84,9 +101,11 @@ internal sealed class HostSettings
         try
         {
             using var writer = new BinaryWriter(File.Create(PathOf(slotData)));
+            var settings = CoopSession.Current.Settings;
             writer.Write(Format);
-            CoopSession.Current.Settings.Write(writer);
-            writer.Write(CoopSession.Current.Settings.Password);
+            settings.Write(writer);
+            writer.Write(settings.Password);
+            writer.Write((byte)settings.Network);
         }
         catch (Exception exception) when (exception is IOException || exception is UnauthorizedAccessException)
         {
@@ -110,6 +129,9 @@ internal sealed class HostSettings
             Debug.LogWarning("[Multiplayer] Could not remove the campaign's host settings: " + exception.Message);
         }
     }
+
+    // A campaign ever hosted keeps its host settings beside its save, written with every save made while hosting.
+    internal static bool IsHosted(SaveSlotData slot) => slot != null && File.Exists(PathOf(slot));
 
     private static string PathOf(SaveSlotData slot) => SaveSystem.SaveFolder + slot.slotName + Extension;
 }

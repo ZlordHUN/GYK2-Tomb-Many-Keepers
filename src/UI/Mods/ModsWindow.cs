@@ -12,9 +12,9 @@ namespace GYK2.TombManyKeepers.UI.Mods;
 
 // The Mods window, opened from the main menu: a copy of the game's save list window as wide as Join Game's, headed
 // "Mods", with the mods loaded now on the left, each on one of the list's own cards as GYK1 listed its mods, and the
-// picked mod's settings on the right as the game's own option rows. It takes the screen's height as Join Game does,
-// as far as its background reaches, with Back below it. A gamepad moves through the mods, each showing its settings,
-// enters them with its select key or by moving right, and leaves them, and then the window, with its back key.
+// picked mod's settings and controls on the right as the game's own option rows. It takes the screen's height as Join
+// Game does, as far as its background reaches, with Back below it. A gamepad moves through the mods, each showing its
+// settings, enters them with its select key or by moving right, and leaves them, and then the window, with its back key.
 internal sealed class ModsWindow : LazyWindow<LazyWidgetDataBase>
 {
     // Drawn for the game's smallest canvas, 640 by 360: the frame from near the screen's top to above its button, which
@@ -119,7 +119,12 @@ internal sealed class ModsWindow : LazyWindow<LazyWidgetDataBase>
         base.Open(data);
         Fit();
         ((RectTransform)transform).RefreshContentFitter();
-        list.Show(Chainloader.PluginInfos.Values, plugin => ModSetting.Of(plugin).Count);
+        list.Show(Chainloader.PluginInfos.Values, plugin =>
+        {
+            var settings = ModSetting.Of(plugin);
+            int keys = settings.Count(setting => setting.IsKey);
+            return (settings.Count - keys, keys + ModControls.Of(plugin).Count);
+        });
         changed = false;
         GamepadNavigationController.ReinitItems(focusOnFirstActive: false);
         var picked = list.PickedItem;

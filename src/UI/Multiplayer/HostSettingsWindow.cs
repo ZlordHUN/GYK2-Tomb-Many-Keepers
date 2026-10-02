@@ -10,7 +10,8 @@ namespace GYK2.TombManyKeepers.UI.Multiplayer;
 // The host's second step, after picking the campaign: the settings the game is hosted with, as option
 // rows in a copy of the game's settings window. Back returns to the campaigns and Next opens the lobby.
 // Picking the campaign first lets a campaign keep settings that must not change once it has begun. A password
-// game shows a row for its password, typed in the game's own text field, and Next waits for one.
+// game shows a row for its password, typed in the game's own text field, and Next waits for one. A host who
+// switched its own cheats off in the Mods window has no Cheats row, and hosts without cheats.
 internal sealed class HostSettingsWindow : LazyWindow<LazyWidgetDataBase>
 {
     private static readonly string[] OnOff = { "Off", "On" };
@@ -19,6 +20,7 @@ internal sealed class HostSettingsWindow : LazyWindow<LazyWidgetDataBase>
     private static HostSettingsWindow instance;
 
     private UISwitchButton players;
+    private UISwitchButton network;
     private UISwitchButton visibility;
     private UISwitchButton cheats;
     private TMP_InputField password;
@@ -52,6 +54,8 @@ internal sealed class HostSettingsWindow : LazyWindow<LazyWidgetDataBase>
             counts[i] = (HostSettings.FewestPlayers + i).ToString();
         window.players = NativeWindow.Choice(row, content, "Players", counts, 0,
             index => window.settings.Players = HostSettings.FewestPlayers + index);
+        window.network = NativeWindow.Choice(row, content, "Network", HostSettings.Reaches, 0,
+            index => window.settings.Network = (HostSettings.Reach)index);
         window.visibility = NativeWindow.Choice(row, content, "Visibility", Enum.GetNames(typeof(HostSettings.Access)), 0, index =>
         {
             window.settings.Visibility = (HostSettings.Access)index;
@@ -81,8 +85,10 @@ internal sealed class HostSettingsWindow : LazyWindow<LazyWidgetDataBase>
             centred = true;
         }
         players.UpdateField(settings.Players - HostSettings.FewestPlayers, fireCallback: false);
+        network.UpdateField((int)settings.Network, fireCallback: false);
         visibility.UpdateField((int)settings.Visibility, fireCallback: false);
         cheats.UpdateField(settings.Cheats ? 1 : 0, fireCallback: false);
+        cheats.gameObject.SetActive(FeatureSwitches.Cheats);
         password.SetTextWithoutNotify(settings.Password);
         ShowPassword();
         GamepadNavigationController.ReinitItems(focusOnFirstActive: true);
@@ -105,7 +111,7 @@ internal sealed class HostSettingsWindow : LazyWindow<LazyWidgetDataBase>
     // arrow's face, in the middle of the window.
     private void CentreRows()
     {
-        var rows = new[] { players, visibility, cheats };
+        var rows = new[] { players, network, visibility, cheats };
         var typed = password.transform.parent;
         float left = float.MaxValue, right = float.MinValue, middle = 0f;
         foreach (var row in rows)

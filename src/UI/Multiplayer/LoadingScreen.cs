@@ -24,6 +24,9 @@ internal static class LoadingScreen
     private static readonly Action<UILoadingOverlay, UILoadingOverlay.SaveLoadProgressPhase> SetPhase =
         AccessTools.MethodDelegate<Action<UILoadingOverlay, UILoadingOverlay.SaveLoadProgressPhase>>(
             AccessTools.Method(typeof(UILoadingOverlay), "SetPhase"));
+    // Where the screen's bar is headed, below zero before it has shown any.
+    private static readonly AccessTools.FieldRef<UILoadingOverlay, float> BarTarget =
+        AccessTools.FieldRefAccess<UILoadingOverlay, float>("progressSliderTargetValue");
     private static UIMainMenuWindow menu;
     private static TextMeshProUGUI label;
     // Opened before this game had anything to load; a failure meanwhile closes it again.
@@ -59,9 +62,9 @@ internal static class LoadingScreen
 
     [HarmonyPostfix]
     [HarmonyPatch("EvaluateProgress")]
-    private static void MapProgress(ref float __result)
+    private static void MapProgress(UILoadingOverlay __instance, ref float __result)
     {
-        Follow();
+        Follow(__instance);
         float own = measuring ? __result : 0f;
         // The host shares its own progress with the players waiting for its game.
         EntryStatus.OwnProgress = own;
@@ -98,7 +101,7 @@ internal static class LoadingScreen
     [HarmonyPatch(typeof(MainGame), nameof(MainGame.CreateGameSaveAndStart))]
     private static void MeasureNewGame()
     {
-        Follow();
+        Follow(LazyUI.Get<UILoadingOverlay>());
         measuring = true;
     }
 
@@ -106,21 +109,22 @@ internal static class LoadingScreen
     [HarmonyPatch(typeof(MainGame), nameof(MainGame.ContinueGame))]
     private static void MeasureContinuedGame()
     {
-        Follow();
-        measuring = true;
         var overlay = LazyUI.Get<UILoadingOverlay>();
+        Follow(overlay);
+        measuring = true;
         if (EntryStatus.Current != EntryStatus.Phase.None && overlay.IsShown)
             SetPhase(overlay, UILoadingOverlay.SaveLoadProgressPhase.FadeIn);
     }
 
-    // Each entry's bar starts from the beginning.
-    private static void Follow()
+    // Each entry's bar starts where the screen's stands: from the beginning on a screen drawn for it, and on one already
+    // up, as the pause menu's Load Game opens it before the host's load begins, from where it already shows.
+    private static void Follow(UILoadingOverlay overlay)
     {
         if (entry == EntryStatus.Entry)
             return;
         entry = EntryStatus.Entry;
         measuring = false;
-        shown = 0f;
+        shown = overlay != null && overlay.IsShown ? Mathf.Max(0f, BarTarget(overlay)) : 0f;
     }
 
     [HarmonyPostfix]

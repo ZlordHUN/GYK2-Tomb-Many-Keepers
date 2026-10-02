@@ -55,7 +55,10 @@ internal static class WorldSync
         FightAnimation,
         FightKeeper,
         FightRequest,
-        FightFlag
+        FightFlag,
+        Craft,
+        CraftProgress,
+        CampaignValue
     }
 
     // Reliable messages hold at most 512 KiB.
@@ -281,6 +284,15 @@ internal static class WorldSync
                 break;
             case Change.FightFlag:
                 FightFlags.Apply(reader);
+                break;
+            case Change.Craft:
+                CraftProgress.ApplyWhole(reader);
+                break;
+            case Change.CraftProgress:
+                CraftProgress.ApplyProgress(reader);
+                break;
+            case Change.CampaignValue:
+                CampaignValues.Apply(reader);
                 break;
             default:
                 ObjectState.Apply(change, reader);

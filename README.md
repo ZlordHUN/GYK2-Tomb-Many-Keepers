@@ -12,54 +12,81 @@ An unofficial GYK2 mod, porting features from
 - Server browser with ping, favorites, passwords and Steam invitations; configurable lobbies with chat and shared loading screens.
 - Persistent characters with personal inventories, points, talents and buffs.
 - Multiplayer prison opening; rescue the other keepers with the pickaxe.
-- Shared quests, unlocks and reputation, with story rewards for each player.
+- Shared quests, unlocks and reputation, with quest, technology and town-repair rewards for each keeper. Unique story items are shared once per character; handing one in removes everyone's copy.
+- Shared campaign progress, including sermons, building upgrades, basement blockages, body/zombie counts and story choices.
 - Synced world objects, drops, NPCs, time and weather; shared chests and crafting stations used by one player at a time.
-- Shared cutscenes, speech and dialogue choices within the same scene.
-- Other players' name tags with coloured outlines and matching names in lobby chat.
+- Shared mining, shackle and crafting progress bars, including zombie-operated and automatic crafts.
+- Shared cutscenes and conversations: nearby keepers walk alongside the keeper who triggered the scene and share its camera; distant players can keep exploring. Participants take turns speaking and choosing answers.
+- Shared tutorials appear when players are free: the first player to close one advances the story; everyone closes their own copy when ready. Already-read tutorials stay read, and manual rereads stay personal.
+- Other players' name tags with coloured outlines and matching chat names.
+- In-game chat, a shared NPC dialogue log and recent history for late joiners.
+- Chat commands for items, bodies, teleportation, time and weather, with host-controlled guest access.
 - Individual sleeping; time advances quickly only when everyone sleeps.
 - Pause-menu **Save Game** and **Load Game**, with named new saves and overwriting existing saves.
 - Widescreen and ultrawide support, animated menu artwork and resolutions through 8K, including closer **x3** views at **3440×1440** and **5120×1440**.
-- Mod title beneath the game's logo and a **Mods** menu with settings for installed plugins.
-- Settings rows centred across languages; left-click or Space to skip startup logos.
+- Mod title beneath the game's logo and a **Mods** menu with plugin settings and controls.
+- Settings rows centred across languages; resolution changes apply on **OK**, with a second **OK** closing Settings.
+- Left-click or Space to skip startup logos; fixed a new-game loading error after leaving a campaign at daybreak.
 
 Choose **Multiplayer → Host Game**, select a campaign, then **Next** to choose
-the player limit (2–4) and access settings. **Next** opens the lobby. Guests use
-**Join Game → Internet** or **LAN**, select a game and **Connect**, then **Ready**.
+the player limit (1–4), **Online / LAN Only** and access settings. **Next** opens
+the lobby; choose a limit of **1** to play alone with joining disabled. Guests
+use **Join Game → Internet** or **LAN**, select a game and **Connect**, then
+**Ready**.
 With guests present, everyone—including the host—selects **Ready**; ready avatars
 have gold outlines. The host then selects **Start Game**. A host alone can start
 immediately. Late joiners select **Ready → Join Game**. Right-click a listing to
 add it to **Favorites**.
 
-**Visibility:** Public and Password games appear on the Internet tab. Friends
+**Visibility:** Online Public and Password games appear on the Internet tab. Friends
 games accept the host's Steam friends over LAN; Private games require an invite.
 Use **Invite** in the lobby, or its friends list on wide screens. Invites bypass
-passwords and currently require LAN/VPN access. The Friends browser tab, lobby
-codes, keeper customization and Cheats are unfinished. **Sample** listings are
-previews and cannot be joined.
+passwords and currently require LAN/VPN access. LAN Only skips Steam
+publication and P2P connections. The Friends browser tab, lobby codes and keeper
+customization are unfinished. **Sample** listings are previews and cannot be joined.
+
+In game, **Enter** or **Y** opens chat; **Enter** sends, **Esc** cancels and **Tab**
+switches Players/NPCs. On Players, `/help` lists commands; **Tab** completes them
+and **Up/Down** picks suggestions. Hosts can use cheats; guests need the host's
+**Cheats** permission. Commands run from in-game chat, not the lobby.
+Lobby and gameplay share recent chat and session notices, including readiness,
+joining, leaving, saving and sleeping. The read-only NPCs tab records dialogue
+and chosen answers. Sending 10 messages within 10 seconds triggers a 30-second
+chat cooldown; readiness announcements count too.
+
+Single-player and multiplayer saves are kept separate. Once hosted, a campaign
+appears only in **Host Game** and multiplayer save lists; single-player
+**Continue** skips it. This separation also applies with multiplayer disabled.
 
 The host saves everyone's characters. A guest's **Save Game** asks the host to
 save; everyone sees the saving indicator. Only the host has **Load Game** during
 co-op: active players load the selected campaign together, restoring their saved
-characters. New manual saves are separate snapshots; autosaves keep using the
-current slot. Keep `.tmk`, `.tmkhost`, `.tmkname` and `.tmkcolors` sidecars with
+characters. Loads restore the keeper's saved scene, including saves away from
+beds, and rebuild the world so collected objects return to their saved state.
+New manual saves are separate snapshots; autosaves keep using the current slot.
+Keep `.tmk`, `.tmkhost`, `.tmkname` and `.tmkcolors` sidecars with
 campaign backups.
 Workers, player trading and dungeon fighting levels are not supported yet.
 The session ends when the host leaves.
 
 Under **Mods → Tomb Many Keepers**, widescreen support, multiplayer and manual
 saves can each be turned off after a restart. Existing files and saves are kept.
+The separate **Cheats** switch disables your own commands immediately. Scroll
+anywhere over the settings pane with the mouse wheel; **Controls** lists mod keys.
 
-## Potential issues
+## Known issues
 
+- Dungeon cutscenes for collecting the satchel and items from the walls do not lock remote players in place; they can still move during these scenes.
 - Overlapping station access may duplicate shared materials.
 - Shared-account reconnects may select the wrong character.
 - Concurrent world updates may lose changes or desynchronize players.
 - LAN Friends checks can rely on an unverified Steam identity.
 - Logs may contain invite keys; `.tmkhost` stores the password in plain text.
+- `/time` does not reject `NaN`; use named times or `HH:mm`.
 
 ## Install
 
-Requires **Graveyard Keeper 2 1.006** (Windows Mono)
+Targets **Graveyard Keeper 2 1.007.1** (Windows Mono)
 and **BepInEx 5.4.23.5 x64**, with Steam running for multiplayer.
 Every player needs the same `GYK2.TombManyKeepers.dll` and game version. The mod
 stays at 0.1; the browser flags incompatible builds or game versions and explains

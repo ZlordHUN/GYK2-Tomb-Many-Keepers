@@ -2,6 +2,8 @@
   <Import Project="build/UnityMod.props" />
   <PropertyGroup>
     <Version>0.1</Version>
+    <!-- No Git commit in the version: the same source builds the same DLL on any commit, as players' builds must match. -->
+    <IncludeSourceRevisionInInformationalVersion>false</IncludeSourceRevisionInInformationalVersion>
     <Product>Graveyard Keeper 2: Tomb Many Keepers</Product>
     <EnableDefaultItems>false</EnableDefaultItems>
   </PropertyGroup>
@@ -13,7 +15,7 @@
     <Compile Include="src/**/*.cs" Exclude="src/**/bin/**;src/**/obj/**" />
     <EmbeddedResource Include="assets/MainMenu/WideBackground.png" LogicalName="GYK2.TombManyKeepers.WideBackground.png" />
     <EmbeddedResource Include="assets/MainMenu/ModTitle.png" LogicalName="GYK2.TombManyKeepers.ModTitle.png" />
-    <Reference Include="AstarPathfindingProject;com.rlabrecque.steamworks.net;Sirenix.Serialization;Sirenix.Serialization.Config;Unity.TextMeshPro;UnityEngine.UI;UnityEngine.InputLegacyModule;UnityEngine.PhysicsModule;UnityEngine.AnimationModule;UnityEngine.ImageConversionModule;UnityEngine.ParticleSystemModule;UnityEngine.UIModule;UnityEngine.TextRenderingModule;UnityEngine.TextCoreFontEngineModule;Unity.Addressables;Unity.ResourceManager;Cinemachine;DOTween">
+    <Reference Include="AstarPathfindingProject;com.rlabrecque.steamworks.net;Sirenix.Serialization;Sirenix.Serialization.Config;Unity.TextMeshPro;UnityEngine.UI;UnityEngine.InputLegacyModule;UnityEngine.PhysicsModule;UnityEngine.AnimationModule;UnityEngine.ImageConversionModule;UnityEngine.ParticleSystemModule;UnityEngine.UIModule;UnityEngine.TextRenderingModule;UnityEngine.TextCoreFontEngineModule;Unity.Addressables;Unity.ResourceManager;Cinemachine;DOTween;NodeCanvas;ParadoxNotion">
       <HintPath>$(ManagedDir)/%(Identity).dll</HintPath>
       <Private>false</Private>
     </Reference>

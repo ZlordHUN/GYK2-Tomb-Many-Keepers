@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
+using GYK2.TombManyKeepers.Multiplayer.Progression;
 using GYK2.TombManyKeepers.Network.Session;
 using HarmonyLib;
 using UnityEngine;
@@ -137,6 +138,7 @@ internal static class DropClaims
             foreach (var expression in item.Definition.onDropCollected)
                 expression.Evaluate(added[0]);
             Collected(player)?.Invoke(added);
+            StoryItems.Claimed(item);
         }
         // What no longer fits falls at the player's feet.
         if (item.Count > 0)
