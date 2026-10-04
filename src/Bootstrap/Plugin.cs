@@ -4,7 +4,7 @@ using HarmonyLib;
 
 namespace GYK2.TombManyKeepers;
 
-[BepInPlugin("gyk2.tombmanykeepers", "Graveyard Keeper 2: Tomb Many Keepers", "0.1")]
+[BepInPlugin("gyk2.tombmanykeepers", "Graveyard Keeper 2: Tomb Many Keepers", "0.2")]
 [BepInProcess("GraveyardKeeper2.exe")]
 public sealed class Plugin : BaseUnityPlugin
 {
