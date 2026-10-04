@@ -58,7 +58,8 @@ internal static class WorldSync
         FightFlag,
         Craft,
         CraftProgress,
-        CampaignValue
+        CampaignValue,
+        ConveyorTick
     }
 
     // Reliable messages hold at most 512 KiB.
@@ -293,6 +294,9 @@ internal static class WorldSync
                 break;
             case Change.CampaignValue:
                 CampaignValues.Apply(reader);
+                break;
+            case Change.ConveyorTick:
+                ConveyorTicks.Apply(reader);
                 break;
             default:
                 ObjectState.Apply(change, reader);
