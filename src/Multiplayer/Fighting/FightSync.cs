@@ -95,10 +95,15 @@ internal static class FightSync
 
     [HarmonyPostfix]
     [HarmonyPatch(typeof(FightingGameController), nameof(FightingGameController.Stop))]
-    private static void Stopped()
+    private static void Stopped(bool hasCustomAfterFightPos, bool stopAsWon)
     {
+        // How the host ends it decides where everyone goes next, such as into the scene that follows.
         if (CoopSession.IsHosting && WorldSync.Sharing)
-            WorldSync.Queue(WorldSync.Change.FightStop, Guid.Empty, _ => { });
+            WorldSync.Queue(WorldSync.Change.FightStop, Guid.Empty, writer =>
+            {
+                writer.Write(hasCustomAfterFightPos);
+                writer.Write(stopAsWon);
+            });
     }
 
     // A joined player's game never runs the phases, so it spawns nothing of its own.
@@ -158,7 +163,8 @@ internal static class FightSync
         var controller = LazySingleton<FightingGameController>.Instance;
         if (controller.CurrentFightState == FightState.Disabled)
             return;
+        bool customPosition = reader.ReadBoolean(), won = reader.ReadBoolean();
         Debug.Log("[Multiplayer] The host ended the battle");
-        controller.Stop();
+        controller.Stop(customPosition, won);
     }
 }
