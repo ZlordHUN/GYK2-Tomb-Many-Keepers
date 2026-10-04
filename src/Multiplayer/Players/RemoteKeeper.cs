@@ -159,6 +159,19 @@ internal sealed class RemoteKeeper : MonoBehaviour
             Destroy(keeper);
     }
 
+    // Other keepers wear this player's own skin or the armour without holding them, so their going
+    // must not unload them from under this player's keeper, which then shows bald.
+    private static readonly AccessTools.FieldRef<AnimationComponentBase, SkinPresetGK2> Skin =
+        AccessTools.FieldRefAccess<AnimationComponentBase, SkinPresetGK2>("skinPreset");
+
+    [HarmonyPrefix]
+    [HarmonyPatch(typeof(AnimationComponent), "OnDestroy")]
+    private static void KeepSharedSkin(AnimationComponent __instance)
+    {
+        if (__instance is PlayerAnimation && __instance != MainGame.PlayerController?.View?.PlayerAnimation)
+            Skin(__instance) = null;
+    }
+
     internal static void Clear()
     {
         for (int slot = 1; slot < Keepers.Length; slot++)
