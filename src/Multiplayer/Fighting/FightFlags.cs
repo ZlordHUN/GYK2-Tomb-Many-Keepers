@@ -32,6 +32,12 @@ internal static class FightFlags
     private static void UsedStand(WGOInteractionHandlerBase __instance, PlayerController interactor, bool __result) =>
         Share(__instance, interactor, __result);
 
+    // A barricade holds a flag too.
+    [HarmonyPostfix]
+    [HarmonyPatch(typeof(BarricadeInteractionHandler), nameof(BarricadeInteractionHandler.Interact))]
+    private static void UsedBarricade(WGOInteractionHandlerBase __instance, PlayerController interactor, bool __result) =>
+        Share(__instance, interactor, __result);
+
     private static void Share(WGOInteractionHandlerBase handler, PlayerController interactor, bool done)
     {
         var session = CoopSession.Current;
@@ -77,7 +83,10 @@ internal static class FightFlags
         }
     }
 
-    // As the game keeps a carried flag on its own keeper every frame.
+    // Allies pushing the carrier's body must not drag the flag, or they twitch at its rim.
+    private const float FlagDeadZone = 0.5f;
+
+    // As the game keeps a carried flag on its own keeper every frame, from where that player says they are.
     [HarmonyPostfix]
     [HarmonyPatch(typeof(FightingGameController), "Update")]
     private static void Follow()
@@ -86,9 +95,12 @@ internal static class FightFlags
             return;
         foreach (var pair in carried)
         {
-            var body = RemoteKeeper.Talking(pair.Key)?.GetComponentInParent<PlayerPhysicalBody>();
-            if (body != null && pair.Value != null && pair.Value.Data != null)
-                pair.Value.Data.Position = body.transform.position;
+            var at = RemoteKeeper.PositionOf(pair.Key);
+            var data = pair.Value != null ? pair.Value.Data : null;
+            if (at == null || data == null)
+                continue;
+            if ((at.Value - data.Position).sqrMagnitude > FlagDeadZone * FlagDeadZone)
+                data.Position = at.Value;
         }
     }
 
