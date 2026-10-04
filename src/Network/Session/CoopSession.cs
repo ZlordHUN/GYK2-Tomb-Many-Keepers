@@ -7,6 +7,7 @@ using System.Net.Sockets;
 using GYK2.TombManyKeepers.Features.ManualSaves;
 using GYK2.TombManyKeepers.Multiplayer.Cheats;
 using GYK2.TombManyKeepers.Multiplayer.Chat;
+using GYK2.TombManyKeepers.Multiplayer.Fighting;
 using GYK2.TombManyKeepers.Multiplayer.Players;
 using GYK2.TombManyKeepers.Multiplayer.Presentation;
 using GYK2.TombManyKeepers.Multiplayer.Progression;
@@ -1947,6 +1948,7 @@ internal sealed class CoopSession : MonoBehaviour
         entrants.Remove(slot);
         ChatCooldown.Forget(slot);
         SharedPresentation.Forget(slot);
+        FightFlags.Forget(slot);
         if (IsHost && KeeperSpawn.Active)
             UpdateRest();
         RemoteKeeper.Release(slot);

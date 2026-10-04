@@ -122,10 +122,56 @@ internal static class FightFlags
     [HarmonyPatch(typeof(FightingGameController), nameof(FightingGameController.Stop))]
     private static void Stopped()
     {
-        foreach (var slot in carried.Keys)
-            RemoteKeeper.ShowBanner(slot, false, "");
-        carried.Clear();
-        looks.Clear();
+        foreach (var slot in new List<int>(carried.Keys))
+            Drop(slot);
+    }
+
+    // A player who leaves drops their flag where they were; their last order stands, and the host puts it
+    // in a one-time stand there, as the game does for a flag on a fallen barricade, so anyone can take it.
+    internal static void Forget(int slot)
+    {
+        var flag = Drop(slot);
+        if (flag != null && CoopSession.IsHosting &&
+            LazySingleton<FightingGameController>.Instance.CurrentFightState != FightState.Disabled)
+            Stand(flag);
+    }
+
+    // As the game drops its own keeper's flag when a battle ends.
+    private static Wgo Drop(int slot)
+    {
+        RemoteKeeper.ShowBanner(slot, false, "");
+        looks.TryGetValue(slot, out var look);
+        carried.TryGetValue(slot, out var flag);
+        carried.Remove(slot);
+        looks.Remove(slot);
+        if (flag == null || flag.Data == null)
+            return null;
+        if (!string.IsNullOrEmpty(look))
+            flag.Data.ApplyWgoPartState(look, 0);
+        AgentsGroupFlagController.SetInteractionLocked(flag, isLocked: false);
+        Debug.Log($"[Multiplayer] Keeper {slot}'s flag is dropped");
+        return flag;
+    }
+
+    private static void Stand(Wgo flag)
+    {
+        var controller = LazySingleton<FightingGameController>.Instance;
+        var data = new WgoData("flag_stand_one_time", flag.Data.Position, flag.Data.WorldId);
+        MainGame.Instance.GameSave.worldData.AddWgoData(data);
+        controller.AddTemporaryWgoData(data);
+        var stand = GameScene.GetWgoViewGlobal(data.UniqueId);
+        if (stand == null)
+            return;
+        var group = flag.GetComponentInChildren<AgentsGroupFlagController>();
+        if (group != null)
+            group.IsSetAtPoint = false;
+        var holder = stand.GetComponentInChildren<FlagStandComponent>();
+        if (holder != null)
+        {
+            holder.AttachFlag(flag);
+            controller.FlagStandComponents.Add(holder);
+        }
+        stand.Data.GameResStr.Set(FlagStandInteractionHandler.GAME_RES_STR_KEY, flag.Data.UniqueId.ToString());
     }
 
     // The game's own lookup throws when no look is active.
