@@ -21,6 +21,7 @@ internal static class FightFlags
 
     // Flags that other players carry, by their slot.
     private static readonly Dictionary<int, Wgo> carried = new Dictionary<int, Wgo>();
+    private static readonly Dictionary<int, string> looks = new Dictionary<int, string>();
 
     [HarmonyPostfix]
     [HarmonyPatch(typeof(FlagInteractionHandler), nameof(FlagInteractionHandler.Interact))]
@@ -62,10 +63,15 @@ internal static class FightFlags
         if (session == null || slot == session.LocalSlot || target == null || target.InteractionHandler == null)
             return;
         // This game's keeper stands in for the other one for this one interaction, then gets its own flag back.
+        // A carried flag's look lives only in the banner, and setting it down reads it from there.
         var me = MainGame.PlayerController;
+        var banner = me.View.Banner;
         var own = me.attachedWgo;
+        string ownLook = Look(banner);
         carried.TryGetValue(slot, out var theirs);
+        looks.TryGetValue(slot, out var theirLook);
         me.attachedWgo = theirs;
+        banner.Show(theirs != null, theirLook ?? "");
         try
         {
             target.InteractionHandler.Interact(me);
@@ -73,12 +79,20 @@ internal static class FightFlags
         finally
         {
             var now = me.attachedWgo;
+            string nowLook = now != null ? Look(banner) : "";
             me.attachedWgo = own;
-            me.View.Banner.Show(own != null, own != null ? own.Data.MainWgoPartData.variationId : "");
+            banner.Show(own != null, ownLook);
             if (now != null)
+            {
                 carried[slot] = now;
+                looks[slot] = nowLook;
+            }
             else
+            {
                 carried.Remove(slot);
+                looks.Remove(slot);
+            }
+            RemoteKeeper.ShowBanner(slot, now != null, nowLook);
             Debug.Log($"[Multiplayer] Keeper {slot} {(now != null ? "carries" : "set down")} a flag");
         }
     }
@@ -106,5 +120,20 @@ internal static class FightFlags
 
     [HarmonyPostfix]
     [HarmonyPatch(typeof(FightingGameController), nameof(FightingGameController.Stop))]
-    private static void Stopped() => carried.Clear();
+    private static void Stopped()
+    {
+        foreach (var slot in carried.Keys)
+            RemoteKeeper.ShowBanner(slot, false, "");
+        carried.Clear();
+        looks.Clear();
+    }
+
+    // The game's own lookup throws when no look is active.
+    private static string Look(BannerView banner)
+    {
+        if (!banner.IsVisible)
+            return "";
+        try { return banner.GetCurVariationId(); }
+        catch (NullReferenceException) { return ""; }
+    }
 }

@@ -52,6 +52,13 @@ internal sealed class RemoteKeeper : MonoBehaviour
         return keeper == null || !keeper.body.gameObject.activeInHierarchy ? null : keeper.body.PlayerView.BubblePoint;
     }
 
+    // The flag another player's keeper carries, as their own game shows it.
+    internal static void ShowBanner(int slot, bool carrying, string look)
+    {
+        var keeper = KeeperSpawn.Active ? Find(slot) : null;
+        keeper?.body.PlayerView.Banner?.Show(carrying, look);
+    }
+
     // The animation that talks for another player's keeper.
     internal static AnimationComponent Talking(int slot)
     {
